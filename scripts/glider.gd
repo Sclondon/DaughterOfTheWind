@@ -5,7 +5,8 @@ extends Node3D
 ##
 ## Forward is -Z. The stick asks for a bank angle and an angle of attack; the nose is always being
 ## pulled back into the airflow (like a weathervane), which is what makes it settle into a glide.
-## The air it flies through comes from `clouds.wind_at()`, and `fleet.hit()` stops it flying through hulls.
+## The air it flies through is the sum of `wind_at()` from everything in `air` (clouds, the coast's
+## ridge lift), and everything in `solids` (the fleet, the land) pushes it back out through `hit()`.
 
 signal bumped
 
@@ -43,8 +44,10 @@ const MAX_SPEED := 110.0
 const BODY_RADIUS := 2.2
 
 var input: Node
-var clouds: Node
-var fleet: Node
+## Nodes with wind_at(world) -> Vector3. Their winds add up.
+var air: Array = []
+## Nodes with hit(world, radius) -> Vector3 (the push that gets a ball out of them, or ZERO).
+var solids: Array = []
 
 var velocity := Vector3(0, 0, -31)
 ## Jet fuel, 0..1. It refills when you are not burning it.
@@ -57,7 +60,10 @@ var load_factor := 1.0
 var climb := 0.0
 var aoa := 0.0
 var stalled := false
+var looping := false
 var rising_air := 0.0
+## The stick as the glider feels it (smoothed). The model moves its flaps and wingtips from this.
+var control := Vector2.ZERO
 var model: Node3D
 
 var _stick := Vector2.ZERO
@@ -91,10 +97,11 @@ func _physics_process(dt: float) -> void:
 		want_boost = input.boost
 		want_brake = input.brake
 	_stick = _stick.lerp(want, 1.0 - exp(-STICK_SMOOTH * dt))
+	control = _stick
 
 	var wind := Vector3.ZERO
-	if clouds:
-		wind = clouds.wind_at(position)
+	for source: Node in air:
+		wind += source.wind_at(position)
 	rising_air = wind.y
 	var air: Vector3 = velocity - wind
 	var speed: float = maxf(air.length(), 0.01)
@@ -115,6 +122,11 @@ func _physics_process(dt: float) -> void:
 	# Bank means little when pointing straight up or down, so ease the roll off there.
 	var level_ish: float = 1.0 - smoothstep(0.8, 0.98, absf(b.z.y))
 	var roll: float = clampf((_stick.x * MAX_BANK - bank) * ROLL_GAIN, -ROLL_RATE, ROLL_RATE)
+	# Upside down with the stick held back or forward means a loop: do not roll her upright halfway
+	# round, just keep the wings level (inverted counts as level) and let the stick nudge the roll.
+	looping = b.y.y < 0.0 and absf(_stick.y) > 0.3
+	if looping:
+		roll = clampf(-b.x.y * ROLL_GAIN * 1.5 + _stick.x * ROLL_RATE * 0.5, -ROLL_RATE, ROLL_RATE)
 	b = Basis(-b.z, roll * level_ish * authority * dt) * b
 
 	var ask: float = _stick.y * AOA_CMD
@@ -167,8 +179,8 @@ func _physics_process(dt: float) -> void:
 	position += velocity * dt
 	basis = b
 
-	if fleet:
-		var push: Vector3 = fleet.hit(position, BODY_RADIUS)
+	for solid: Node in solids:
+		var push: Vector3 = solid.hit(position, BODY_RADIUS)
 		if push != Vector3.ZERO:
 			var n: Vector3 = push.normalized()
 			position += push

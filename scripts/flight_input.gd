@@ -8,6 +8,7 @@ extends Node
 
 signal reset_pressed
 signal weather_pressed(index: int)
+signal level_pressed
 
 const STICK_RADIUS := 110.0
 const DEADZONE := 0.18
@@ -25,7 +26,8 @@ var stick_now := Vector2.ZERO
 var _boost_touch := -1
 
 
-func _input(event: InputEvent) -> void:
+# Unhandled, so a tap on a HUD button does not also steer or boost.
+func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			var width: float = get_viewport().get_visible_rect().size.x
@@ -48,6 +50,8 @@ func _input(event: InputEvent) -> void:
 		match event.physical_keycode:
 			KEY_R:
 				reset_pressed.emit()
+			KEY_L:
+				level_pressed.emit()
 			KEY_1:
 				weather_pressed.emit(0)
 			KEY_2:

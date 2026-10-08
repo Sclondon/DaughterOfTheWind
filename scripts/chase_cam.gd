@@ -37,8 +37,14 @@ func _process(delta: float) -> void:
 	if _dir.length() < 0.01:
 		_dir = fwd
 	_dir = _dir.normalized()
-	var up_goal: Vector3 = (Vector3.UP * 0.7 + t.basis.y * 0.3).normalized()
-	_up = _up.lerp(up_goal, 1.0 - exp(-4.0 * delta)).normalized()
+	# Flying level, the camera mostly keeps the horizon flat. Nose high, nose low or upside down
+	# (a loop), "up" stops meaning much, so it goes over with the glider instead of flipping.
+	var level: float = (1.0 - smoothstep(0.45, 0.85, absf(fwd.y))) * smoothstep(-0.1, 0.35, t.basis.y.y)
+	var up_goal: Vector3 = Vector3.UP * 0.7 * level + t.basis.y * (1.0 - 0.7 * level)
+	_up = _up.lerp(up_goal, 1.0 - exp(-5.0 * delta))
+	if _up.length() < 0.05:
+		_up = t.basis.y
+	_up = _up.normalized()
 	_place(t)
 	var speed: float = target.airspeed
 	var want_fov: float = 68.0 + clampf((speed - 25.0) / 60.0, 0.0, 1.0) * 24.0
@@ -48,7 +54,9 @@ func _process(delta: float) -> void:
 func _place(t: Transform3D) -> void:
 	var pos: Vector3 = t.origin - _dir * DISTANCE + _up * HEIGHT
 	var look: Vector3 = (t.origin - t.basis.z * 6.0 + _up * 0.8) - pos
-	var up: Vector3 = _up
-	if absf(look.normalized().dot(up)) > 0.97:
-		up = t.basis.y
-	global_transform = Transform3D(Basis.looking_at(look, up), pos)
+	# Square the up vector to the view so the camera never rolls suddenly.
+	var view: Vector3 = look.normalized()
+	var up: Vector3 = _up - view * _up.dot(view)
+	if up.length() < 0.05:
+		up = t.basis.y - view * t.basis.y.dot(view)
+	global_transform = Transform3D(Basis.looking_at(look, up.normalized()), pos)

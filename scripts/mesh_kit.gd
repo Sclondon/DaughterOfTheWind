@@ -96,6 +96,33 @@ static func wing(half_span: float, root_chord: float, tip_chord: float, sweep: f
 	return loft(rings)
 
 
+## A flat panel with rounded edges, lofted along X: the glider's wing panels, flaps and round tips.
+## `xs` are the X positions of its sections (ascending). `edges` takes an X and returns
+## Vector2(leading edge z, trailing edge z) there, so the outline can be any shape. The panel thins
+## where it narrows, which rounds off a tip like a pillow.
+static func slab(xs: PackedFloat32Array, edges: Callable, thickness: float, steps: int = 6) -> ArrayMesh:
+	var widest: float = 0.001
+	for x in xs:
+		var e: Vector2 = edges.call(x)
+		widest = maxf(widest, e.y - e.x)
+	var rings: Array = []
+	for x in xs:
+		var e: Vector2 = edges.call(x)
+		var chord: float = maxf(e.y - e.x, 0.02)
+		var mid: float = (e.x + e.y) * 0.5
+		var half: float = thickness * 0.5 * sqrt(chord / widest)
+		var ring := PackedVector3Array()
+		# Under the panel from the trailing edge to the leading edge, then back over the top.
+		for k in steps:
+			var c: float = cos(PI * float(k) / float(steps))
+			ring.append(Vector3(x, -half * 0.7 * sqrt(1.0 - pow(absf(c), 2.6)), mid + c * chord * 0.5))
+		for k in steps:
+			var c: float = -cos(PI * float(k) / float(steps))
+			ring.append(Vector3(x, half * sqrt(1.0 - pow(absf(c), 2.6)), mid + c * chord * 0.5))
+		rings.append(ring)
+	return loft(rings)
+
+
 ## A hull lofted along Z, nose at -Z. `profile` takes t (0 at the nose, 1 at the tail) and returns
 ## Vector3(half width, half height, centre height). `power` above 2 squares the cross-section off;
 ## `belly` below 1 flattens the underside.

@@ -7,20 +7,22 @@ README.md covers the controls and how it flies.
 
 The whole world is built in code. `scenes/main.tscn` is just `scripts/main.gd`.
 
-- `main.gd`: builds the sky, sun, clouds, glider, input, camera, fleet and HUD; whites the view out inside cloud; restart and weather keys.
-  - Exported switches for tests: `use_fleet`, `use_pads`, `show_hud`.
+- `main.gd`: builds the sky, sun, clouds, glider, input, camera and HUD, plus what the level adds: `"clouds"` (cloud sea + fleet) or `"coast"` (`coast.gd`). Whites the view out inside cloud; restart, weather keys, `next_level()` (reloads the scene; the pick is the static `chosen`).
+  - Exported switches for tests: `level`, `use_fleet`, `use_pads`, `show_hud`.
 - `glider.gd`: the flight model (Node3D, forward is -Z, integrated in `_physics_process`). Lift and drag from airspeed and angle of attack; the stick asks for a bank angle and an angle of attack. All tuning is the constants at the top.
-  - Reads the air from `clouds.wind_at()`, and is pushed out of ships by `fleet.hit()` (signal `bumped`).
-- `glider_model.gd`: the white gull-wing glider, the pilot, the jet flame and the two wingtip `trail.gd` ribbons.
+  - Its air is the sum of `wind_at()` over the nodes in `air`; the nodes in `solids` push it out through `hit()` (signal `bumped`). `control` is the smoothed stick.
+  - Upside down with the stick held (`looping`), the roll control keeps the wings level instead of rolling upright, so loops go round.
+- `glider_model.gd`: the flat white panel-wing glider (after the user's reference still), the pilot, the jet flame. Flaps and round tips are separate nodes that move with `control` and `load_factor`. Each wingtip `trail.gd` ribbon gets its strength from the lift that tip is making (its own speed and angle).
 - `flight_input.gd`: keys, gamepad and touch into `stick` / `boost` / `brake`. `stick.y` positive pulls the nose up. Tests set `manual = true` and write the values.
-- `chase_cam.gd`: follows the glider's interpolated transform in `_process`.
+- `chase_cam.gd`: follows the glider's interpolated transform in `_process`; keeps the horizon mostly flat when level and goes over with the glider in a loop.
+- `coast.gd`: the coast level. `height_at(x, z)` is the land; the ground mesh, ocean shallows (a height-map texture), placement and collision all come from it. Also `hit()` and `wind_at()` (ridge lift from `SEA_WIND`). Spires, towers and windmills collide as tapered columns (`_columns`).
 - `cloud_manager.gd`: the cloud system. Grid cells per layer (`LAYERS`: cumulus, towers, wisps) stream in around `focus`; each cell is one MultiMesh of puffs, grown from a seed, so a place always has the same clouds. Also the sea of clouds sheet.
   - Air queries in world space: `density_at(p)`, `wind_at(p)` (thermals under clouds, gusts inside them, lift over the cloud sea).
   - `set_weather(0..2)`, `prewarm()`, `stats()`, `all_clouds()`.
   - The node itself drifts on the wind; cloud positions are in its space, so subtract `drift` from world points.
 - `airship.gd`: one ship built from a length and a seed (`build()`), cruising straight; `hit()` is its collision. `fleet.gd` holds the convoy formation and brings it back round when the glider loses it.
-- `mesh_kit.gd`: `loft`, `wing`, `body`, `rod`. UVs are in metres.
-- `shaders/`: `cloud_puff` (MultiMesh puffs; per-puff data in INSTANCE_CUSTOM and COLOR), `cloud_sea`, `sky`, `hull` (plates, rivets, belly paint, portholes).
+- `mesh_kit.gd`: `loft`, `wing`, `slab`, `body`, `rod`. UVs are in metres.
+- `shaders/`: `cloud_puff` (MultiMesh puffs; per-puff data in INSTANCE_CUSTOM and COLOR), `cloud_sea`, `sky`, `hull` (plates, rivets, belly paint, portholes), `terrain` (grass, fields from vertex colour red, cliff rock by slope), `ocean`.
 
 ## Commands
 
@@ -32,11 +34,12 @@ Run from this folder with `--headless --fixed-fps 60 --path . -s res://tests/<na
 
 | Test | What a pass looks like |
 | --- | --- |
-| `flight_test` | 8 PASS |
+| `flight_test` | 10 PASS (includes a full loop) |
 | `cloud_test` | 10 PASS |
 | `fleet_test` | 5 PASS |
+| `coast_test` | 6 PASS |
 
-`tests/shots.gd` needs a window (no `--headless`) and takes `-- <out dir>`; it saves 13 views (glider close-ups, a turn, the fleet, the cloud sea).
+`tests/shots.gd` needs a window (no `--headless`) and takes `-- <out dir>`; it saves 13 views (glider close-ups, a turn, the fleet, the cloud sea), or with `-- <out dir> coast` the coast views. Run tests under `timeout`: a script error at startup hangs the run.
 
 ## Conventions
 

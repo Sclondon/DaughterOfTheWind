@@ -1,15 +1,16 @@
 extends MeshInstance3D
 ## A ribbon of vapour left behind a point on the glider (a wingtip). It lives in world space,
-## turns to face the camera, and fades along its length. `strength` (0..1) is how visible new
-## vapour is; the glider model sets it from how hard the wing is working.
+## turns to face the camera, and fades along its length. `strength` (0..1) is how much vapour is
+## coming off right now; the glider model sets it from how hard that tip is working. Stronger
+## vapour is brighter, wider and hangs in the air longer.
 
-const LIFE := 1.0
+const LIFE := 2.4
 const SPACING := 0.6
-const WIDTH := 0.05
+const WIDTH := 0.07
 
 var source: Node3D
 var offset := Vector3.ZERO
-var strength := 0.1
+var strength := 0.0
 
 var _points: Array = []  # each [Vector3 position, float born, float strength]
 var _mesh := ImmediateMesh.new()
@@ -34,6 +35,11 @@ func _ready() -> void:
 func clear() -> void:
 	_points.clear()
 	_mesh.clear_surfaces()
+
+
+## How long vapour of a given strength lasts.
+func _life(s: float) -> float:
+	return LIFE * (0.25 + 0.75 * s)
 
 
 func _process(_delta: float) -> void:
@@ -62,18 +68,18 @@ func _process(_delta: float) -> void:
 		var s: float = strength
 		if i < _points.size():
 			p = _points[i][0]
-			age = (now - (_points[i][1] as float)) / LIFE
 			s = _points[i][2]
+			age = minf((now - (_points[i][1] as float)) / _life(s), 1.0)
 		var before: Vector3 = _points[maxi(i - 1, 0)][0]
 		var after: Vector3 = tip if i + 1 >= _points.size() else (_points[i + 1][0] as Vector3)
 		var along: Vector3 = after - before
 		var side: Vector3 = along.cross(eye - p)
 		if side.length() < 0.0001:
 			side = Vector3.UP
-		side = side.normalized() * WIDTH * (1.0 + age)
+		side = side.normalized() * WIDTH * (0.6 + s) * (1.0 + age * 1.5)
 		# Vapour right in front of the lens would fill the screen, so it thins out near the camera.
-		var close: float = smoothstep(3.5, 8.5, eye.distance_to(p))
-		var color := Color(1, 1, 1, s * (1.0 - age) * (1.0 - age) * 0.6 * close)
+		var close: float = smoothstep(3.0, 8.0, eye.distance_to(p))
+		var color := Color(1, 1, 1, s * (1.0 - age) * (1.0 - age) * 0.75 * close)
 		_mesh.surface_set_color(color)
 		_mesh.surface_add_vertex(p + side)
 		_mesh.surface_set_color(color)

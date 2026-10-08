@@ -71,6 +71,10 @@ var drift := Vector3.ZERO
 ## The weather: 1 is fair, less is clearer, more is heavier.
 var coverage := 1.0
 var world_seed := 20261008
+## False leaves out the sea of clouds (and its lift), for a level with real ground below.
+var sea_enabled := true
+## Raises every layer's base by this much, to clear high ground.
+var altitude_shift := 0.0
 
 var sun_dir := Vector3.UP
 var lit_color := Color(1.0, 0.97, 0.91)
@@ -198,6 +202,7 @@ func _build_sea() -> void:
 	_sea.position.y = SEA_Y
 	_sea.extra_cull_margin = SEA_AMP * 2.0
 	_sea.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_sea.visible = sea_enabled
 	add_child(_sea)
 
 
@@ -243,6 +248,11 @@ func set_weather(index: int) -> void:
 		_centers[li] = null
 	_queue.clear()
 	prewarm()
+
+
+## The shared noise texture (red: smooth noise, green: cell noise), for other shaders to reuse.
+func noise_texture() -> ImageTexture:
+	return _noise_tex
 
 
 ## How many cells and puffs are alive, for the tests and for tuning.
@@ -402,7 +412,7 @@ func _grow_cloud(layer: Dictionary, key: Vector2i, rng: RandomNumberGenerator, r
 	var rx: float = half
 	var rz: float = half * rng.randf_range(0.55, 1.0)
 	var turn: float = rng.randf() * TAU
-	var base_y: float = float(layer["base"]) + rng.randf_range(-1.0, 1.0) * float(layer["base_jitter"])
+	var base_y: float = float(layer["base"]) + altitude_shift + rng.randf_range(-1.0, 1.0) * float(layer["base_jitter"])
 	var height: float = half * float(layer["tall"]) * rng.randf_range(0.7, 1.2)
 	var foot := Vector3((key.x + rng.randf_range(0.2, 0.8)) * cell_size, base_y,
 			(key.y + rng.randf_range(0.2, 0.8)) * cell_size)
@@ -486,6 +496,8 @@ func density_at(world: Vector3) -> float:
 				var d := Vector3(p.x - puffs[i], (p.y - puffs[i + 1]) / squash, p.z - puffs[i + 2])
 				best = maxf(best, 1.0 - d.length() / puffs[i + 3])
 	var inside: float = smoothstep(0.0, 0.3, best)
+	if not sea_enabled:
+		return inside
 	var sea: float = smoothstep(SEA_Y + SEA_AMP * 0.6, SEA_Y + SEA_AMP * 0.25, p.y)
 	return maxf(inside, sea)
 
@@ -505,7 +517,8 @@ func wind_at(world: Vector3) -> Vector3:
 			var column: float = smoothstep(SEA_Y, SEA_Y + 160.0, p.y) * (1.0 - smoothstep(cloud.top_y - 60.0, cloud.top_y + 60.0, p.y))
 			lift += cloud.thermal * (1.0 - out * out) * column
 	# The wind will not let its daughter drown: strong lift once she sinks into the cloud sea.
-	lift += RESCUE_LIFT * smoothstep(SEA_Y + SEA_AMP * 0.45, SEA_Y - 60.0, p.y)
+	if sea_enabled:
+		lift += RESCUE_LIFT * smoothstep(SEA_Y + SEA_AMP * 0.45, SEA_Y - 60.0, p.y)
 	var air := Vector3(0.0, lift, 0.0)
 	# Inside cloud the air is rough.
 	var thick: float = density_at(world)

@@ -29,6 +29,28 @@ func _save(shot: String) -> void:
 	print("saved ", shot)
 
 
+func _coast_shots() -> void:
+	var glider: Node3D = main.glider
+	var coast: Node3D = main.coast
+	var rz: float = coast.RZ
+	# Along the south cliffs, over the village, over the farms, and the whole island from high up.
+	var views := [
+		["20_cliffs", Vector3(-1400, 260, rz + 260), 1.35],
+		["21_village", Vector3(-900, 300, rz + 150), -0.9],
+		["22_farms", Vector3(600, 480, 900), 0.5],
+		["23_island", Vector3(-3000, 1500, rz + 4200), -0.5],
+		["24_spires", Vector3(2500, 150, rz + 1300), 0.9],
+	]
+	for view: Array in views:
+		glider.reset(view[1], view[2])
+		main.cam.snap()
+		main.clouds.prewarm()
+		await _wait(50)
+		await _save(view[0])
+	_view(Vector3(-700, 300, rz + 500), Vector3(-500, 190, rz - 300), 55.0)
+	await _save("25_village_from_sea")
+
+
 ## Look at a point from an offset, with a separate camera.
 func _view(from: Vector3, at: Vector3, fov: float = 60.0) -> void:
 	free_cam.fov = fov
@@ -39,6 +61,9 @@ func _view(from: Vector3, at: Vector3, fov: float = 60.0) -> void:
 func _run() -> void:
 	main = Main.instantiate()
 	main.use_pads = false
+	# "-- <folder> coast" shoots the coast level instead.
+	if OS.get_cmdline_user_args().size() > 1:
+		main.level = OS.get_cmdline_user_args()[1]
 	root.add_child(main)
 	await _wait(2)
 	var glider: Node3D = main.glider
@@ -74,6 +99,11 @@ func _run() -> void:
 	await _save("06_turn")
 	input.stick = Vector2.ZERO
 	input.boost = false
+
+	if main.level == "coast":
+		await _coast_shots()
+		quit()
+		return
 
 	# The fleet.
 	var flagship: Node3D = main.fleet.ships[0]

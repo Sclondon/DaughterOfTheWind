@@ -30,7 +30,7 @@ func _run() -> void:
 	var glider: Node3D = main.glider
 	var fleet: Node3D = main.fleet
 	main.input.manual = true
-	glider.clouds = null
+	glider.air = []
 	glider.bumped.connect(func() -> void: bumps += 1)
 	_check("a convoy is flying", fleet.ships.size() == 5, "%d ships" % fleet.ships.size())
 

@@ -47,7 +47,7 @@ func _run() -> void:
 	input.manual = true
 
 	# 1. Hands off in still air: it should settle into a steady, shallow glide.
-	glider.clouds = null
+	glider.air = []
 	glider.reset(Vector3(0, 3000, 0))
 	await _fly(30.0, Vector2.ZERO)
 	var y0: float = glider.position.y
@@ -97,8 +97,35 @@ func _run() -> void:
 	_check("boost adds speed and burns fuel", glider.airspeed > v3 + 8.0 and glider.burn < 0.5,
 			"speed %.1f -> %.1f, fuel %.2f" % [v3, glider.airspeed, glider.burn])
 
+	# A loop: boost, then hold the stick back all the way over the top and round again.
+	glider.reset(Vector3(0, 3000, 0))
+	await _fly(3.0, Vector2.ZERO, true)
+	var been_inverted := false
+	var came_round := false
+	var worst_roll: float = 0.0
+	var worst_jump: float = 0.0
+	var last_cam: Basis = main.cam.global_basis
+	input.stick = Vector2(0, 1)
+	input.boost = true
+	for i in 600:
+		await physics_frame
+		await process_frame
+		if glider.basis.y.y < -0.8:
+			been_inverted = true
+		if been_inverted and glider.basis.y.y > 0.9 and glider.basis.z.y > -0.3:
+			came_round = true
+			break
+		worst_roll = maxf(worst_roll, absf(glider.basis.x.y))
+		var cam_now: Basis = main.cam.global_basis
+		worst_jump = maxf(worst_jump, (last_cam.inverse() * cam_now).get_rotation_quaternion().get_angle())
+		last_cam = cam_now
+	input.boost = false
+	_check("a loop goes all the way round", been_inverted and came_round and worst_roll < 0.25,
+			"inverted %s, round %s, worst wing tilt %.2f" % [been_inverted, came_round, worst_roll])
+	_check("the camera follows the loop smoothly", worst_jump < 0.12, "biggest turn in one frame %.3f rad" % worst_jump)
+
 	# 7. With the real air back, the wind lifts a glider that has sunk into the cloud sea.
-	glider.clouds = main.clouds
+	glider.air = [main.clouds]
 	glider.reset(Vector3(0, -40, 0))
 	await _fly(20.0, Vector2.ZERO)
 	_check("the cloud sea carries her back up", glider.position.y > 10.0, "height %.1f m" % glider.position.y)

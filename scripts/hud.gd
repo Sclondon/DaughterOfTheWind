@@ -1,12 +1,16 @@
 extends CanvasLayer
 ## The little there is on screen: speed, height and climb in one corner, the jet's fuel as a thin
 ## bar, the touch stick while a finger is down, the white-out when flying through cloud, and the
-## title and controls for the first few seconds.
+## title and controls for the first few seconds. A small button in the top corner names the level
+## and switches to the next one.
+
+signal level_pressed
 
 var glider: Node3D
 var input: Node
 ## 0..1, set by main: how deep in cloud the camera is.
 var whiteout := 0.0
+var level_name := ""
 
 var _white: ColorRect
 var _stats: Label
@@ -64,6 +68,22 @@ func _ready() -> void:
 	_fuel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_fuel)
 	_pin(_fuel, 0.0, 1.0, 0.0, 1.0, Rect2(24, -30, 170, 6))
+
+	var level := Button.new()
+	level.text = "%s  ›" % level_name
+	level.focus_mode = Control.FOCUS_NONE
+	level.add_theme_font_size_override("font_size", 16)
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(1, 1, 1, 0.18)
+	plate.set_corner_radius_all(14)
+	plate.set_content_margin_all(8)
+	plate.content_margin_left = 14
+	plate.content_margin_right = 14
+	for state: String in ["normal", "hover", "pressed"]:
+		level.add_theme_stylebox_override(state, plate)
+	level.pressed.connect(func() -> void: level_pressed.emit())
+	add_child(level)
+	_pin(level, 1.0, 0.0, 1.0, 0.0, Rect2(-236, 16, 220, 36))
 
 	_title = _label(54, HORIZONTAL_ALIGNMENT_CENTER)
 	_title.text = "Daughter of the Wind"

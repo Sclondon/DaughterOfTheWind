@@ -32,8 +32,12 @@ func _run() -> void:
 	var coast: Node3D = main.coast
 	var glider: Node3D = main.glider
 	main.input.manual = true
-	_check("airships sail off the coast", main.fleet != null and main.fleet.ships.size() == 5, "%d ships" % main.fleet.ships.size())
-	main.fleet.armed = false
+	var nearest_ship: float = INF
+	for side: Node3D in main.battle.fleets:
+		for ship: Node3D in side.ships:
+			nearest_ship = minf(nearest_ship, coast.inland(ship.position.x, ship.position.z))
+	_check("two fleets fight off the coast", main.battle.fleets.size() == 2 and nearest_ship < -300.0, "nearest ship %.0f m off shore" % -nearest_ship)
+	main.battle.armed = false
 	glider.bumped.connect(func() -> void: bumps += 1)
 
 	# Away from the valley: sea to the west, and the cliffs straight out of it to the east.
@@ -50,13 +54,21 @@ func _run() -> void:
 	var vs: float = coast.shore_x(coast.VALLEY_Z)
 	var beach: float = coast.height_at(vs + 120.0, coast.valley_mid(vs + 120.0))
 	var floor_600: float = coast.height_at(vs + 600.0, coast.valley_mid(vs + 600.0))
-	_check("the valley runs gently down to a beach", beach > 0.0 and beach < 9.0 and floor_600 < 60.0,
+	_check("the valley runs gently down to a beach", beach > 0.0 and beach < 9.0 and floor_600 < 75.0,
 			"%.1f m at the beach, %.0f m at 600 m in (the cliffs are %.0f m there)" % [beach, floor_600, coast.height_at(shore + 600.0, z)])
 	_check("the castle stands in the valley", coast.valley(coast.castle.x, coast.castle.z) > 0.9 and coast.hit(coast.castle + Vector3(20, 120, 0), 2.0) != Vector3.ZERO,
 			"at %s" % coast.castle)
 
 	var here: Dictionary = coast.stats()
-	_check("the ledges are lived on", here["windmills"] >= 6 and here["ledge_houses"] >= 60 and here["spires"] >= 4, str(here))
+	_check("the ledges are lived on", here["windmills"] >= 6 and here["ledge_houses"] >= 60, str(here))
+	_check("the sea is a maze of spires and arches", here["spires"] >= 40 and here["arches"] >= 6, "%d spires, %d arches" % [here["spires"], here["arches"]])
+	_check("giant trees stand in the valley", here["great_trees"] >= 4, "%d great trees, besides the one by the castle" % here["great_trees"])
+	var up_valley: float = coast.shore_x(0.0) + 2400.0
+	var bumpy: float = 0.0
+	for i in 20:
+		var zz: float = coast.valley_mid(up_valley) - 200.0 + i * 20.0
+		bumpy = maxf(bumpy, absf(coast.height_at(up_valley, zz) - coast.height_at(up_valley, zz + 20.0)))
+	_check("the valley floor is not smooth", bumpy > 1.5, "steepest 20 m step across it: %.1f m" % bumpy)
 	var start: Vector3 = coast.start_position()
 	_check("she starts in clear air over the sea", coast.hit(start, 3.0) == Vector3.ZERO and coast.height_at(start.x, start.z) < 0.0, str(start))
 

@@ -29,12 +29,16 @@ func _run() -> void:
 	await physics_frame
 	var glider: Node3D = main.glider
 	var fleet: Node3D = main.fleet
+	var battle: Node3D = main.battle
 	main.input.manual = true
 	glider.air = []
 	# Hold fire for the collision checks; the guns get their own check at the end.
-	fleet.armed = false
+	battle.armed = false
 	glider.bumped.connect(func() -> void: bumps += 1)
-	_check("a convoy is flying", fleet.ships.size() == 5, "%d ships" % fleet.ships.size())
+	_check("two fleets are flying", battle.fleets.size() == 2 and fleet.ships.size() == 5 and battle.fleets[1].ships.size() == 5,
+			"%d and %d ships" % [fleet.ships.size(), battle.fleets[1].ships.size()])
+	_check("they are painted as two sides", fleet.ships[0]._metal.get_shader_parameter("base_color") != battle.fleets[1].ships[0]._metal.get_shader_parameter("base_color"), "")
+	_check("each side has fighters up", battle.squadron.fighters.size() == 8, "%d fighters" % battle.squadron.fighters.size())
 
 	var flagship: Node3D = fleet.ships[0]
 	var before: Vector3 = flagship.position
@@ -58,17 +62,37 @@ func _run() -> void:
 			deepest = maxf(deepest, flagship.hit(glider.position, 0.0).length())
 		_check("she bounces off the %s" % run[0], bumps > 0 and deepest < 1.5, "%d bumps, deepest %.2f m inside" % [bumps, deepest])
 
-	# Left far behind, the convoy comes round again ahead of her.
+	# The two sides shoot at each other, and their fighters fight: hold her well out of it and watch.
+	battle.armed = true
+	glider.reset(flagship.position + Vector3(0, 2500, 0))
+	glider.set_physics_process(false)
+	var flak: Node3D = battle.flak
+	for i in 2400:
+		await process_frame
+	_check("the fleets fire on each other", flak.shots_fired > 40 and flak.bursts > 30, "%d shots, %d bursts with her out of range" % [flak.shots_fired, flak.bursts])
+	_check("fighters shoot fighters down", battle.squadron.losses > 0, "%d shot down in 40 s" % battle.squadron.losses)
+	var strayed: float = 0.0
+	for fighter in battle.squadron.fighters:
+		strayed = maxf(strayed, fighter.node.position.distance_to(battle.centre))
+	_check("the fighters stay with the battle", strayed < 9000.0, "furthest %.0f m from the middle" % strayed)
+	glider.set_physics_process(true)
+	battle.armed = false
+
+	# Left far behind, the battle is set down again near her.
 	glider.reset(Vector3(60000, 700, 60000))
 	for i in 5:
 		await physics_frame
 	var gap: float = flagship.position.distance_to(glider.position)
-	_check("the convoy finds her again", gap < 6000.0, "flagship %.0f m away" % gap)
+	_check("the battle finds her again", gap < 9000.0, "flagship %.0f m away" % gap)
 
 	# The guns: fly straight and level past the flagship, above its deck, and it should open fire,
 	# with the shells bursting close by.
-	fleet.armed = true
-	var flak: Node3D = fleet.flak
+	battle.armed = true
+	flak.shots_fired = 0
+	flak.bursts = 0
+	flak.hits = 0
+	flak.closest = INF
+	battle.squadron.armed = false
 	glider.reset(flagship.position + flagship.global_basis * Vector3(180, 110, 420), flagship.heading)
 	var top: Node3D = flagship._turrets[0][0]
 	var aim: float = -1.0

@@ -7,7 +7,8 @@ extends Node3D
 ##   "coast"   the sea, and an endless wall of towering terraced cliffs with farms, hamlets and
 ##             windmills on the ledges, and a valley running down to a beach with the castle in it
 ##             (coast.gd)
-## Both have the airship fleet, whose guns fire on the glider. Shot down, she starts again.
+## Both have the battle (battle.gd): two fleets of airships fighting each other, with their
+## fighters, and all of them firing on the glider. Shot down, she starts again.
 ## This script also fades the view to white when the camera is inside a cloud, and handles
 ## restart (R), the weather keys (1 / 2 / 3), switching level (L, or the button on the HUD) and
 ## switching rider between the glider and the witch on her broom (G, or its button).
@@ -18,7 +19,8 @@ const CloudManager := preload("res://scripts/cloud_manager.gd")
 const Glider := preload("res://scripts/glider.gd")
 const FlightInput := preload("res://scripts/flight_input.gd")
 const ChaseCam := preload("res://scripts/chase_cam.gd")
-const Fleet := preload("res://scripts/fleet.gd")
+const Battle := preload("res://scripts/battle.gd")
+const SunGlare := preload("res://scripts/sun_glare.gd")
 const Coast := preload("res://scripts/coast.gd")
 const Hud := preload("res://scripts/hud.gd")
 const SkyShader := preload("res://shaders/sky.gdshader")
@@ -52,6 +54,8 @@ var clouds: Node3D
 var glider: Node3D
 var input: Node
 var cam: Camera3D
+var battle: Node3D
+## The first of the battle's two fleets (kept for the tests).
 var fleet: Node3D
 var coast: Node3D
 var hud: CanvasLayer
@@ -60,9 +64,10 @@ var start_heading := 0.0
 
 var _env: Environment
 var _whiteout := 0.0
-# Where the convoy starts, from where the glider starts, and which way it sails.
-var _fleet_from := Vector3(260, -70, -1150)
-var _fleet_heading := 0.22
+# The middle of the circle the battle starts on, and how far round it the flagships begin.
+# (Over the clouds: the nearest ships a little over a kilometre ahead, coming her way.)
+var _battle_at := Vector3(-2900, 560, -1300)
+var _battle_angle := 0.0
 
 
 func _ready() -> void:
@@ -106,25 +111,33 @@ func _ready() -> void:
 		glider.solids.append(coast)
 		start = coast.start_position()
 		start_heading = coast.start_heading()
-		# The convoy sails north along the cliffs, out over the water, and will cross the mouth of
-		# the valley a few minutes after she comes in from the sea.
-		_fleet_from = Vector3(1700, 330, 3300)
-		_fleet_heading = 0.0
+		# The battle circles out over the sea, off to her right as she comes in toward the valley.
+		_battle_at = Vector3(coast.shore_x(0.0) - 5200.0, 640.0, 4500.0)
+		_battle_angle = -0.9
 	if use_fleet:
-		fleet = Fleet.new()
-		fleet.focus = glider
-		if level == "coast":
-			# When it comes round again, keep it above the island and its pinnacles.
-			fleet.floor_y = 1300.0
-			fleet.ceiling_y = 1500.0
-		add_child(fleet)
-		glider.solids.append(fleet)
+		battle = Battle.new()
+		battle.focus = glider
+		battle.land = coast
+		add_child(battle)
+		fleet = battle.fleets[0]
+		glider.solids.append(battle)
 		glider.downed.connect(restart, CONNECT_DEFERRED)
 
 	cam = ChaseCam.new()
 	cam.target = glider
 	add_child(cam)
 	cam.make_current()
+
+	# The sun's glare sits under the HUD.
+	var lens := CanvasLayer.new()
+	lens.layer = 0
+	add_child(lens)
+	var glare: ColorRect = SunGlare.new()
+	glare.camera = cam
+	glare.sun_dir = sun_dir
+	glare.clouds = clouds
+	glare.land = coast
+	lens.add_child(glare)
 
 	if show_hud:
 		hud = Hud.new()
@@ -182,8 +195,8 @@ func _build_sky() -> void:
 
 func restart() -> void:
 	glider.reset(start, start_heading)
-	if fleet:
-		fleet.place(start + _fleet_from, _fleet_heading)
+	if battle:
+		battle.place(_battle_at, _battle_angle)
 	if coast:
 		coast.prewarm()
 	cam.snap()

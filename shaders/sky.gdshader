@@ -12,6 +12,6 @@ void sky() {
 	float h = EYEDIR.y;
 	vec3 col = mix(horizon, zenith, pow(clamp(h, 0.0, 1.0), 0.42));
 	float toward = max(dot(EYEDIR, sun_dir), 0.0);
-	col += sun_color * (smoothstep(0.9993, 0.9997, toward) * 3.0 + pow(toward, 60.0) * 0.25 + pow(toward, 6.0) * 0.05);
+	col += sun_color * (smoothstep(0.9988, 0.9993, toward) * 4.0 + pow(toward, 90.0) * 0.5 + pow(toward, 14.0) * 0.16 + pow(toward, 4.0) * 0.06);
 	COLOR = col;
 }

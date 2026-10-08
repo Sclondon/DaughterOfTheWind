@@ -16,13 +16,17 @@ The whole world is built in code. `scenes/main.tscn` is just `scripts/main.gd`.
 - `witch_model.gd`: the other rider, a witch on a broomstick (`glider.rider = "witch"`). Same flight, different model; one spark trail from the broom's tail.
 - `flight_input.gd`: keys, gamepad and touch into `stick` / `boost` / `brake`. `stick.y` positive pulls the nose up. Tests set `manual = true` and write the values.
 - `chase_cam.gd`: follows the glider's interpolated transform in `_process`; keeps the horizon mostly flat when level and goes over with the glider in a loop.
-- `coast.gd`: the coast level: sea to the west (-X), endless terraced cliffs running along Z, one valley down to a beach with the castle in it. `height_at(x, z)` is the land (`shore_x`, `inland`, `valley`); ground chunks stream around `focus` (fine near, coarse far, skirts hide the seams, none over open sea) and each grows its own hamlets, windmills, trees and spires from a seed. Also `hit()` and `wind_at()` (ridge lift from `SEA_WIND`). Spires, towers and windmills collide as tapered columns.
+- `coast.gd`: the coast level: sea to the west (-X), endless terraced cliffs running along Z, one valley down to a beach with the castle in it. `height_at(x, z)` is the land (`shore_x`, `inland`, `valley`); ground chunks stream around `focus` (fine near, coarse far, skirts hide the seams, none over open sea) and each grows its own hamlets, windmills, trees and spires from a seed. Also `hit()` and `wind_at()` (ridge lift from `SEA_WIND`). Spires, towers, windmills and giant trees collide as tapered columns; rock arches as runs of capsules. The valley has a stream (`river_z`, repeated in `shaders/terrain`), flower meadows and wobbly fields (all in the terrain shader, driven by vertex colours: red farm, green sand, blue stream).
   - `shaders/ocean.gdshader` repeats `shore_x()`, the valley and the sea bed slope so the water knows where the shore is. Change them together.
 - `cloud_manager.gd`: the cloud system. Grid cells per layer (`LAYERS`: cumulus, towers, wisps) stream in around `focus`; each cell is one MultiMesh of puffs, grown from a seed, so a place always has the same clouds. Also the sea of clouds sheet.
   - Air queries in world space: `density_at(p)`, `wind_at(p)` (thermals under clouds, gusts inside them, lift over the cloud sea).
   - `set_weather(0..2)`, `prewarm()`, `stats()`, `all_clouds()`.
   - The node itself drifts on the wind; cloud positions are in its space, so subtract `drift` from world points.
-- `airship.gd`: one ship built from a length and a seed (`build()`), cruising straight; `hit()` is its collision. `fleet.gd` holds the convoy formation and brings it back round when the glider loses it. Turrets (`_work_guns`) lead the glider and fire through `flak.gd`, which owns the shells and the Wind Waker-style puff explosions (`shaders/burst`); `fleet.armed = false` holds fire. A hit calls `glider.take_hit()` (5 health, mends; `downed` restarts).
+- `airship.gd`: one ship built from a length and a seed (`build()`), cruising straight; `hit()` is its collision. Turrets (`_work_guns`) fire at the glider when she is in range, otherwise at the nearest of `foes`, through `flak.gd`, which owns the shells and the Wind Waker-style puff explosions (`shaders/burst`). A hit calls `glider.take_hit()` (5 health, mends; `downed` restarts).
+- `battle.gd`: the war. Two `fleet.gd` (one per side, sailing the same circle a broadside apart), one shared `flak.gd`, and `squadron.gd` (the H-shaped fighters: steered, not flown with the flight model; they chase the glider or each other and are shot down and relaunched). `battle.armed = false` holds all fire; `battle.place()` moves the whole thing. `main.fleet` is `battle.fleets[0]`.
+- `toon.gd` + `shaders/toon.gdshader` + `shaders/toon.gdshaderinc`: the look. Every solid material is cel shaded (custom `light()`, no outlines) and washed with `art/watercolor.png`, which is a **global shader uniform** (`[shader_globals]` in project.godot; regenerate with `tools/make_watercolor.gd`). Use `Toon.paint()` / `tinted()` / `glowing()`, never StandardMaterial3D, for anything lit. Unshaded shaders (clouds, ocean) sample `watercolor` themselves.
+- `hair.gd`: the rider's long hair, a small verlet cloth in world space pinned to the head.
+- `sun_glare.gd` + `shaders/sun_glare`: the lens glare, a full-screen additive canvas shader under the HUD.
 - `mesh_kit.gd`: `loft`, `wing`, `slab`, `body`, `rod`. UVs are in metres.
 - `shaders/`: `cloud_puff` (MultiMesh puffs; per-puff data in INSTANCE_CUSTOM and COLOR), `cloud_sea`, `sky`, `hull` (plates, rivets, belly paint, portholes), `terrain` (grass, fields from vertex colour red, cliff rock by slope), `ocean`.
 
@@ -38,8 +42,9 @@ Run from this folder with `--headless --fixed-fps 60 --path . -s res://tests/<na
 | --- | --- |
 | `flight_test` | 11 PASS (includes a full loop and the witch) |
 | `cloud_test` | 10 PASS |
-| `fleet_test` | 7 PASS |
-| `coast_test` | 10 PASS |
+| `fleet_test` | 12 PASS |
+| `coast_test` | 13 PASS |
+| `hair_test` | 3 PASS (run without `--fixed-fps`) |
 
 `tests/shots.gd` needs a window (no `--headless`) and takes `-- <out dir>`; it saves 13 views (glider close-ups, a turn, the fleet, the cloud sea), or with `-- <out dir> coast [witch]` the coast views (cliffs, valley, castle, flak, explosions). Run tests under `timeout`: a script error at startup hangs the run.
 

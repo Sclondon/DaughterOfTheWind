@@ -36,6 +36,13 @@ pointing/emulate_touch_from_mouse=true
 
 common/physics_interpolation=true
 
+[shader_globals]
+
+watercolor={
+"type": "sampler2D",
+"value": "res://art/watercolor.png"
+}
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"

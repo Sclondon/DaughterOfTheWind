@@ -7,6 +7,7 @@ render_mode unshaded, cull_back, fog_disabled;
 // the horizon is the same haze colour, so no edge shows.
 
 uniform sampler2D noise_tex : repeat_enable, filter_linear_mipmap;
+global uniform sampler2D watercolor : repeat_enable, filter_linear_mipmap;
 uniform vec3 sun_dir = vec3(0.0, 1.0, 0.0);
 uniform vec3 lit_color : source_color = vec3(1.0, 0.98, 0.94);
 uniform vec3 shade_color : source_color = vec3(0.62, 0.7, 0.84);
@@ -58,7 +59,12 @@ void fragment() {
 	// The creases between billows stay in shade, the crowns catch the sun.
 	float crown = smoothstep(0.66, 1.0, h);
 	float tone = smoothstep(0.42, 0.72, light) * mix(0.2, 1.0, crown);
+	// Cel shading: three flat tones instead of a smooth blend.
+	tone = smoothstep(0.22, 0.28, tone) * 0.5 + smoothstep(0.62, 0.68, tone) * 0.5;
 	vec3 col = mix(shade_color, lit_color, tone);
+	vec3 paper = texture(watercolor, sea_pos / 1700.0).rgb;
+	col *= mix(0.9, 1.05, paper.r);
+	col = mix(col, shade_color, paper.g * 0.12);
 
 	float haze = 1.0 - exp(-dist / haze_distance);
 	haze = max(haze * 0.92, smoothstep(reach * 0.45, reach * 0.95, dist));

@@ -4,10 +4,11 @@ shader_type spatial;
 // and rain streaks. UVs are in metres (see MeshKit.loft), so the plates are the same size on every
 // part. The fine detail fades with distance so a far-off ship does not sparkle.
 
+#include "toon.gdshaderinc"
+
 uniform vec3 base_color : source_color = vec3(0.33, 0.35, 0.37);
 uniform vec3 streak_color : source_color = vec3(0.2, 0.17, 0.14);
 uniform vec2 plate = vec2(6.5, 4.0);
-uniform float metal = 0.6;
 // The hull also gets paintwork: a dark belly, a stripe at the waterline, and rows of lit portholes.
 uniform bool is_hull = false;
 uniform float hull_length = 240.0;
@@ -83,8 +84,8 @@ void fragment() {
 	col *= mix(1.0, mix(0.62, 1.0, seam), mid);
 	col = mix(col, col * 1.5 + 0.03, rivet * near * 0.6);
 
-	ALBEDO = col;
+	ALBEDO = wash(col, l_pos, normalize(l_normal), 55.0);
 	EMISSION = window_glow * glow * 1.4;
-	METALLIC = metal;
-	ROUGHNESS = mix(0.42, 0.66, tone);
+	ROUGHNESS = 1.0;
+	SPECULAR = 0.0;
 }

@@ -11,6 +11,7 @@ render_mode unshaded, cull_back, fog_disabled;
 //   COLOR.rgb       = direction from the cloud's core to this puff, packed 0..1
 
 uniform sampler2D noise_tex : repeat_enable, filter_linear_mipmap;
+global uniform sampler2D watercolor : repeat_enable, filter_linear_mipmap;
 uniform vec3 sun_dir = vec3(0.0, 1.0, 0.0);
 uniform vec3 lit_color : source_color = vec3(1.0, 0.98, 0.94);
 uniform vec3 shade_color : source_color = vec3(0.62, 0.7, 0.84);
@@ -87,12 +88,18 @@ void fragment() {
 	light *= mix(0.6, 1.0, smoothstep(-0.7, 0.4, n.y));
 	light *= mix(0.78, 1.0, puff.z);
 	light *= mix(0.72, 1.0, smoothstep(0.25, 0.7, crease));
-	float tone = smoothstep(0.2, 0.68, light);
+	// Cel shading: lit, a half tone, or shade.
+	float tone = smoothstep(0.3, 0.36, light) * 0.6 + smoothstep(0.54, 0.6, light) * 0.4;
 	vec3 col = mix(shade_color, lit_color, tone);
 	col = mix(col, shade_color * 0.84, (1.0 - tone) * smoothstep(0.1, -0.8, n.y) * 0.7);
 	// A silver lining when the sun is behind the cloud.
 	float against = pow(max(dot(-v, sun_dir), 0.0), 5.0);
 	col += rim_color * against * pow(1.0 - facing, 2.0) * 0.7;
+
+	// A watercolour wash over the whole sky's clouds.
+	vec3 paper = texture(watercolor, w_pos.xz / 1500.0 + w_pos.y / 1100.0).rgb;
+	col *= mix(0.9, 1.06, paper.r);
+	col = mix(col, shade_color, paper.g * 0.14);
 
 	float haze = 1.0 - exp(-dist / haze_distance);
 	ALBEDO = mix(col, haze_color, haze * 0.92);

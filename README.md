@@ -9,14 +9,20 @@ There are two levels so far, and no goal or score yet:
 - **The Windward Coast**: the sea to the west and, to the east, towering cliffs that run north
   and south for ever. The cliffs climb in great steps, with terraced fields, hamlets and
   windmills on every ledge. One gentle valley runs down through them to a beach, with the
-  castle and its town in it. The sea wind is pushed up by the cliffs, so you can soar along
-  them without losing height. A convoy of airships sails up the coast.
+  castle and its town in it, a stream, flower meadows and giant old trees. The sea off the
+  cliffs is a maze of rock spires and arches to weave through. The sea wind is pushed up by
+  the cliffs, so you can soar along them without losing height.
 
-You can fly as the white glider or as a witch on a broomstick; the flying is the same.
+You can fly as the white glider (a girl whose long hair streams behind her) or as a witch on a
+broomstick; the flying is the same.
 
-The airships' turrets track you and fire. Shells burst near where you were heading, so flying
-straight gets you hit and turning does not, and the guns cannot see under their own ship. You
-have five hearts, which mend if you stay unhurt; lose them all and you start again.
+Both levels have a war going on in them: two fleets of airships, one grey-blue and one rust-red,
+sailing side by side and firing on each other, with H-shaped fighters from each side tangling
+round them. All of them shoot at you too. Shells burst near where you were heading, so flying
+straight gets you hit and turning does not, and a ship's guns cannot see under its own hull.
+You have five hearts, which mend if you stay unhurt; lose them all and you start again.
+
+Everything is cel shaded and painted with a watercolour wash.
 
 ## Flying
 

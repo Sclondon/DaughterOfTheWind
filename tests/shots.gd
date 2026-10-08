@@ -40,20 +40,26 @@ func _coast_shots() -> void:
 		["22_valley", Vector3(-1500, 260, 150), -PI * 0.5],
 		["23_castle", Vector3(c.x - 900, c.y + 230, c.z + 250), -PI * 0.5 + 0.25],
 		["24_high", Vector3(-3500, 1900, 2500), -1.1],
+		["19_spires", Vector3(-1500, 190, 3400), 0.15],
+		["18_sun", Vector3(-2500, 400, -3000), 0.65],
 		["26_top", Vector3(1800, 1000, -2500), -1.0],
 	]
 	for view: Array in views:
 		glider.reset(view[1], view[2])
 		main.cam.snap()
 		main.clouds.prewarm()
+		coast.prewarm()
 		await _wait(50)
 		await _save(view[0])
+	glider.reset(c + Vector3(-600, 300, 300), -PI * 0.5)
+	coast.prewarm()
 	_view(Vector3(c.x - 330, c.y + 150, c.z + 300), c + Vector3(0, 70, 0), 55.0)
 	await _save("25_castle_close")
 	# The convoy opening fire: fly past the flagship above its deck.
 	var flagship: Node3D = main.fleet.ships[0]
 	main.cam.make_current()
-	glider.reset(flagship.position + flagship.global_basis * Vector3(170, 90, 520), flagship.heading)
+	# Between the two lines of ships.
+	glider.reset(flagship.position + flagship.global_basis * Vector3(-330, 60, 700), flagship.heading)
 	main.cam.snap()
 	for i in 12:
 		await _wait(22)
@@ -62,7 +68,16 @@ func _coast_shots() -> void:
 	await _wait(14)
 	await _save("28_flak")
 	# An explosion close up, early and late.
-	main.fleet.armed = false
+	main.battle.armed = false
+	# A fighter, close up.
+	var fighter: Node3D = main.battle.squadron.fighters[0].node
+	main.battle.squadron.set_process(false)
+	fighter.transform = Transform3D(Basis(Vector3.UP, 0.6), Vector3(-3000, 900, 9000))
+	_view(fighter.position + Vector3(7, 4, -9), fighter.position, 50.0)
+	await _save("31_fighter")
+	_view(fighter.position + Vector3(-2, 11, 4), fighter.position, 50.0)
+	await _save("32_fighter_top")
+	main.cam.make_current()
 	glider.reset(Vector3(-3000, 600, 6000), -PI * 0.5)
 	main.cam.snap()
 	await _wait(30)

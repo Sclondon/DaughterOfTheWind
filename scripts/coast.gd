@@ -4,7 +4,8 @@ extends Node3D
 ## on the steps: every ledge is terraced fields, with hamlets and windmills built into the
 ## cliffside. The top is wild grass and woods. In one place a broad, gently sloping valley cuts
 ## down through the cliffs to a beach, and the castle stands in it with its town around it.
-## Rock spires stand in the sea and on the high ground.
+## The sea off the cliffs is a maze of rock spires and arches to weave through, and giant old
+## trees stand in the valley and here and there along the cliffs.
 ##
 ## The shape of the land is one function, height_at(x, z). The ground is cut into square chunks
 ## that stream in around `focus` and are freed behind it: fine ones close by, coarse ones far off,
@@ -19,6 +20,7 @@ extends Node3D
 const MeshKit := preload("res://scripts/mesh_kit.gd")
 const TerrainShader := preload("res://shaders/terrain.gdshader")
 const OceanShader := preload("res://shaders/ocean.gdshader")
+const Toon := preload("res://scripts/toon.gd")
 
 ## The cliffs: how far in from the shore they reach (m), how many steps they climb in, how tall
 ## they are in all, and how much of each step is wall rather than ledge.
@@ -27,7 +29,8 @@ const TERRACES := 4
 const CLIFF_HEIGHT := 720.0
 const WALL_SHARE := 0.34
 ## The valley: where it meets the sea (z), and half its width there.
-## shaders/ocean.gdshader repeats shore_x(), the valley and the sea bed: keep them in step.
+## shaders/ocean.gdshader repeats shore_x(), the valley and the sea bed, and shaders/terrain
+## repeats river_z(): keep them in step.
 const VALLEY_Z := 0.0
 const VALLEY_HALF := 640.0
 ## How far up the valley the castle stands.
@@ -64,6 +67,9 @@ class Chunk:
 	var fine := false
 	var props: Node3D  # null until the focus has come within PROP_RADIUS
 	var columns: Array = []
+	var capsules: Array = []  # arches, as runs of [Vector3 from, Vector3 to, float radius]
+	var arches := 0
+	var great_trees := 0
 	var houses := 0
 	var ledge_houses := 0
 	var windmills := 0
@@ -74,7 +80,7 @@ var _hills := FastNoiseLite.new()
 var _woods := FastNoiseLite.new()
 var _ground_mat: ShaderMaterial
 var _rock_mat: ShaderMaterial
-var _house_mat: StandardMaterial3D
+var _house_mat: ShaderMaterial
 var _paints := {}
 var _ocean: MeshInstance3D
 var _chunks := {}  # Vector2i -> Chunk
@@ -87,6 +93,8 @@ var _hubs: Array = []
 var _box := BoxMesh.new()
 var _prism := PrismMesh.new()
 var _blob := SphereMesh.new()
+var _crown := SphereMesh.new()
+var _leaf_mat: ShaderMaterial
 
 
 func _ready() -> void:
@@ -101,24 +109,28 @@ func _ready() -> void:
 	_blob.radial_segments = 7
 	_blob.rings = 4
 
+	_crown.radius = 1.0
+	_crown.height = 2.0
+	_crown.radial_segments = 14
+	_crown.rings = 9
+	_leaf_mat = Toon.tinted(110.0)
+
 	_ground_mat = ShaderMaterial.new()
 	_ground_mat.shader = TerrainShader
 	_ground_mat.set_shader_parameter("noise_tex", noise_tex)
+	_ground_mat.set_shader_parameter("valley_z", VALLEY_Z)
 	_rock_mat = _ground_mat.duplicate() as ShaderMaterial
 	_rock_mat.set_shader_parameter("use_farms", false)
-	_house_mat = StandardMaterial3D.new()
-	_house_mat.vertex_color_use_as_albedo = true
-	_house_mat.roughness = 0.85
+	_house_mat = Toon.tinted(60.0)
 	for paint: Array in [["cream", Color(0.9, 0.86, 0.76), 0.9], ["cap", Color(0.55, 0.25, 0.18), 0.7],
 			["sail", Color(0.95, 0.93, 0.86), 0.8], ["timber", Color(0.35, 0.25, 0.18), 0.9],
-			["stone", Color(0.76, 0.72, 0.64), 0.9], ["slate", Color(0.24, 0.33, 0.45), 0.6]]:
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = paint[1]
-		mat.roughness = paint[2]
-		_paints[paint[0]] = mat
+			["stone", Color(0.76, 0.72, 0.64), 0.9], ["slate", Color(0.24, 0.33, 0.45), 0.6],
+			["bark", Color(0.42, 0.31, 0.22), 0.9]]:
+		_paints[paint[0]] = Toon.paint(paint[1], 45.0, true)
 
 	var cx: float = shore_x(VALLEY_Z) + CASTLE_INLAND
-	castle = Vector3(cx, 0.0, valley_mid(cx))
+	# Beside the stream, not in it.
+	castle = Vector3(cx, 0.0, river_z(cx) + 210.0)
 	castle.y = height_at(castle.x, castle.z)
 	_build_ocean()
 	_build_castle()
@@ -157,13 +169,15 @@ func prewarm() -> void:
 ## What is standing right now, for the tests: chunks, houses (and how many of them are on the
 ## cliff ledges), windmills and spires.
 func stats() -> Dictionary:
-	var out := {"chunks": _chunks.size(), "houses": 0, "ledge_houses": 0, "windmills": 0, "spires": 0}
+	var out := {"chunks": _chunks.size(), "houses": 0, "ledge_houses": 0, "windmills": 0, "spires": 0, "arches": 0, "great_trees": 0}
 	for key: Vector2i in _chunks:
 		var chunk: Chunk = _chunks[key]
 		out["houses"] += chunk.houses
 		out["ledge_houses"] += chunk.ledge_houses
 		out["windmills"] += chunk.windmills
 		out["spires"] += chunk.spires
+		out["arches"] += chunk.arches
+		out["great_trees"] += chunk.great_trees
 	return out
 
 
@@ -186,10 +200,18 @@ func valley_mid(x: float) -> float:
 	return VALLEY_Z + 260.0 * sin(x / 1700.0 + 0.5)
 
 
-## 0..1: how far into the valley a point is. 1 on its floor, 0 outside it.
+## Where the stream runs (its z) at a given x: down the middle of the valley, wandering.
+func river_z(x: float) -> float:
+	return valley_mid(x) + 55.0 * sin(x / 160.0 + 1.0)
+
+
+## 0..1: how far into the valley a point is. 1 on its floor, 0 outside it. Inland its sides are
+## ragged, with spurs and side-hollows, not a clean trough.
 func valley(x: float, z: float) -> float:
-	var half: float = VALLEY_HALF + maxf(inland(x, z), 0.0) * 0.08
-	return 1.0 - smoothstep(0.3, 1.0, absf(z - valley_mid(x)) / half)
+	var d: float = maxf(inland(x, z), 0.0)
+	var half: float = VALLEY_HALF + d * 0.08
+	var ragged: float = _hills.get_noise_2d(x * 1.3 + 50.0, z * 1.3) * 0.26 * smoothstep(0.0, 300.0, d)
+	return 1.0 - smoothstep(0.3, 1.0, absf(z - valley_mid(x)) / half + ragged)
 
 
 ## Height of the ground (or the sea bed, below zero) at a point.
@@ -211,8 +233,12 @@ func height_at(x: float, z: float) -> float:
 			+ _hills.get_noise_2d(x, z) * 50.0 * smoothstep(CLIFF_WIDTH, CLIFF_WIDTH + 600.0, d)
 	if v <= 0.0:
 		return high
-	# The valley floor: a beach, then a long gentle climb.
-	var low: float = minf(d * 0.035, 10.0) + maxf(d - 280.0, 0.0) * 0.07 + _hills.get_noise_2d(x * 2.0, z * 2.0 + 700.0) * 5.0
+	# The valley floor: a beach, then a long gentle climb over hummocks and hollows, with the
+	# stream in a dip down the middle.
+	var rough: float = smoothstep(250.0, 700.0, d)
+	var low: float = minf(d * 0.035, 10.0) + maxf(d - 280.0, 0.0) * 0.07 \
+			+ _hills.get_noise_2d(x * 2.6, z * 2.6 + 700.0) * 19.0 * rough + _hills.get_noise_2d(x * 7.0 + 90.0, z * 7.0) * 5.0 * rough
+	low -= 8.0 * exp(-pow((z - river_z(x)) / 36.0, 2.0)) * smoothstep(150.0, 400.0, d)
 	# A knoll for the castle to stand on.
 	low += 24.0 * exp(-Vector2(x - castle.x, z - castle.z).length_squared() / (210.0 * 210.0))
 	return lerpf(high, minf(low, high), v)
@@ -347,11 +373,12 @@ func _build_ground(key: Vector2i, fine: bool) -> MeshInstance3D:
 			var norm := Vector3(heights[jj * w + ii - 1] - heights[jj * w + ii + 1], 2.0 * cell,
 					heights[(jj - 1) * w + ii] - heights[(jj + 1) * w + ii]).normalized()
 			normals[k] = norm
-			# Red carries the farmland to the shader, green the beach sand.
+			# Red carries the farmland to the shader, green the beach sand, blue where the stream may run.
 			var flat: float = smoothstep(0.88, 0.96, norm.y)
 			var farm: float = farm_at(x, z) * flat if h > 12.0 else 0.0
-			var sand: float = valley(x, z) * (1.0 - smoothstep(7.0, 13.0, h))
-			colors[k] = Color(farm, sand, 0.0)
+			var in_valley: float = valley(x, z)
+			var sand: float = in_valley * (1.0 - smoothstep(7.0, 13.0, h))
+			colors[k] = Color(farm, sand, in_valley * smoothstep(110.0, 260.0, inland(x, z)))
 
 	var indices := PackedInt32Array()
 	for j in w - 1:
@@ -413,8 +440,8 @@ func _on_rim(x: float, z: float) -> bool:
 
 
 func _on_valley_floor(x: float, z: float) -> bool:
-	return valley(x, z) > 0.75 and inland(x, z) > 420.0 and normal_at(x, z).y > 0.985 \
-			and Vector2(x - castle.x, z - castle.z).length() > 330.0
+	return valley(x, z) > 0.75 and inland(x, z) > 420.0 and normal_at(x, z).y > 0.965 \
+			and absf(z - river_z(x)) > 45.0 and Vector2(x - castle.x, z - castle.z).length() > 330.0
 
 
 func _build_props(key: Vector2i, chunk: Chunk) -> void:
@@ -431,6 +458,7 @@ func _build_props(key: Vector2i, chunk: Chunk) -> void:
 	var walls: Array = []  # [Transform3D, Color] for each house body
 	var roofs: Array = []
 	var trees: Array = []
+	var crowns: Array = []
 
 	if mid_d > -CHUNK and mid_d < CLIFF_WIDTH + CHUNK:
 		# Hamlets strung along the ledges. Houses only land where the ledge is flat, so each
@@ -458,7 +486,7 @@ func _build_props(key: Vector2i, chunk: Chunk) -> void:
 						rng, chunk, walls, roofs)
 
 	# Trees: woods on the wild top, the odd tree among the fields on the ledges and in the valley.
-	for i in 70:
+	for i in 90:
 		var x: float = x0 + rng.randf() * CHUNK
 		var z: float = z0 + rng.randf() * CHUNK
 		var d: float = inland(x, z)
@@ -467,25 +495,54 @@ func _build_props(key: Vector2i, chunk: Chunk) -> void:
 			continue
 		if height_at(x, z) < 14.0 or normal_at(x, z).y < 0.9:
 			continue
-		var r: float = rng.randf_range(5.0, 9.5)
-		var green := Color(0.16, 0.33, 0.14).lerp(Color(0.26, 0.42, 0.16), rng.randf())
+		if absf(z - river_z(x)) < 22.0 and valley(x, z) > 0.3:
+			continue
+		var r: float = rng.randf_range(6.0, 13.0)
+		var green := Color(0.16, 0.33, 0.14).lerp(Color(0.3, 0.46, 0.16), rng.randf())
 		trees.append([Transform3D(Basis.from_scale(Vector3(r, r * rng.randf_range(1.0, 1.5), r)),
 				Vector3(x, height_at(x, z) + r * 0.6, z)), green])
 
-	# A sea stack off the cliffs, or a pinnacle on the high ground.
+	# A giant old tree: in the valley most of all, now and then on a ledge or the top.
+	var tx: float = x0 + rng.randf() * CHUNK
+	var tz: float = z0 + rng.randf() * CHUNK
+	var td: float = inland(tx, tz)
+	if td > 80.0 and normal_at(tx, tz).y > 0.94 and absf(tz - river_z(tx)) > 60.0 \
+			and Vector2(tx - castle.x, tz - castle.z).length() > 420.0:
+		var in_valley: bool = valley(tx, tz) > 0.6 and td > 380.0
+		if rng.randf() < (0.75 if in_valley else 0.2):
+			_add_great_tree(holder, chunk.columns, Vector3(tx, height_at(tx, tz), tz),
+					rng.randf_range(48.0, 88.0) if in_valley else rng.randf_range(34.0, 62.0), rng, crowns)
+			chunk.great_trees += 1
+
+	# The sea off the cliffs: a maze of stacks and arches, thickest close in, thinning out to sea.
+	# The way in to the beach is kept clear.
+	if mid_d < 0.0 and mid_d > -2700.0:
+		var crowd: float = 1.0 - smoothstep(1500.0, 2700.0, -mid_d)
+		for i in int(round(float(rng.randi_range(4, 8)) * crowd)):
+			var px: float = x0 + rng.randf() * CHUNK
+			var pz: float = z0 + rng.randf() * CHUNK
+			if inland(px, pz) > -110.0 or valley(px, pz) > 0.0 or _crowded(chunk.columns, px, pz, 95.0):
+				continue
+			var tall: float = rng.randf_range(80.0, 430.0) * lerpf(0.55, 1.0, crowd)
+			_add_spire(holder, chunk, Vector3(px, -25.0, pz), tall + 25.0, tall * rng.randf_range(0.13, 0.22) + 15.0, rng)
+		for i in 2:
+			var ax: float = x0 + rng.randf_range(0.15, 0.85) * CHUNK
+			var az: float = z0 + rng.randf_range(0.15, 0.85) * CHUNK
+			if rng.randf() < (0.8 if i == 0 else 0.4) * crowd and inland(ax, az) < -260.0 and valley(ax, az) <= 0.0:
+				_add_arch(holder, chunk, Vector3(ax, 0.0, az), rng)
+
+	# A pinnacle on the high ground.
 	var sx: float = x0 + rng.randf() * CHUNK
 	var sz: float = z0 + rng.randf() * CHUNK
 	var sd: float = inland(sx, sz)
-	if sd < -150.0 and sd > -1500.0 and valley(sx, sz) <= 0.0 and rng.randf() < 0.5:
-		var tall: float = rng.randf_range(90.0, 430.0)
-		_add_spire(holder, chunk, Vector3(sx, -25.0, sz), tall + 25.0, tall * rng.randf_range(0.14, 0.24) + 16.0, rng)
-	elif sd > CLIFF_WIDTH + 500.0 and valley(sx, sz) <= 0.0 and rng.randf() < 0.14:
+	if sd > CLIFF_WIDTH + 500.0 and valley(sx, sz) <= 0.0 and rng.randf() < 0.14:
 		var tall: float = rng.randf_range(130.0, 260.0)
 		_add_spire(holder, chunk, Vector3(sx, height_at(sx, sz) - 15.0, sz), tall, tall * rng.randf_range(0.13, 0.2) + 16.0, rng)
 
 	_scatter(holder, walls, _box)
 	_scatter(holder, roofs, _prism)
 	_scatter(holder, trees, _blob)
+	_scatter(holder, crowns, _crown, _leaf_mat)
 	chunk.houses = walls.size()
 
 
@@ -498,7 +555,9 @@ func _crowded(columns: Array, x: float, z: float, gap: float) -> bool:
 
 
 func _add_house(at: Vector2, rng: RandomNumberGenerator, chunk: Chunk, walls: Array, roofs: Array) -> void:
-	if normal_at(at.x, at.y).y < 0.97 or height_at(at.x, at.y) < 14.0:
+	if normal_at(at.x, at.y).y < 0.955 or height_at(at.x, at.y) < 14.0:
+		return
+	if absf(at.y - river_z(at.x)) < 26.0 and valley(at.x, at.y) > 0.3:
 		return
 	if chunk and inland(at.x, at.y) < CLIFF_WIDTH and valley(at.x, at.y) < 0.05:
 		chunk.ledge_houses += 1
@@ -514,7 +573,7 @@ func _add_house(at: Vector2, rng: RandomNumberGenerator, chunk: Chunk, walls: Ar
 
 
 ## Many copies of one mesh, each with its own transform and colour, drawn in one go.
-func _scatter(holder: Node3D, items: Array, mesh: Mesh) -> void:
+func _scatter(holder: Node3D, items: Array, mesh: Mesh, material: Material = null) -> void:
 	if items.is_empty():
 		return
 	var mm := MultiMesh.new()
@@ -527,7 +586,7 @@ func _scatter(holder: Node3D, items: Array, mesh: Mesh) -> void:
 		mm.set_instance_color(i, items[i][1])
 	var node := MultiMeshInstance3D.new()
 	node.multimesh = mm
-	node.material_override = _house_mat
+	node.material_override = material if material else _house_mat
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	holder.add_child(node)
 
@@ -561,6 +620,83 @@ func _add_spire(holder: Node3D, chunk: Chunk, foot: Vector3, height: float, radi
 	holder.add_child(node)
 	chunk.columns.append([foot, height, radius * 1.05, radius * _taper(1.0) * 1.1 + lean.length()])
 	chunk.spires += 1
+
+
+## A rock arch standing in the sea: a thick tube of rock bent over from one foot to the other,
+## wide enough to fly through. It collides as a run of capsules along its curve.
+func _add_arch(holder: Node3D, chunk: Chunk, at: Vector3, rng: RandomNumberGenerator) -> void:
+	var span: float = rng.randf_range(140.0, 320.0)
+	var rise: float = span * rng.randf_range(0.55, 0.95)
+	var thick: float = rng.randf_range(16.0, 32.0)
+	var yaw: float = rng.randf() * TAU
+	var across := Vector3(cos(yaw), 0.0, sin(yaw))
+	var side := Vector3(-sin(yaw), 0.0, cos(yaw))
+	# The curve from foot to foot. Both feet go well under the water.
+	var path := func(t: float) -> Vector3:
+		var a: float = PI * t
+		return at + across * (-cos(a) * span * 0.5) + Vector3.UP * (pow(maxf(sin(a), 0.0), 0.75) * (rise + 30.0) - 30.0)
+	var steps: int = 14
+	var sides: int = 9
+	var rings: Array = []
+	var middles: Array = []
+	var radii: Array = []
+	for i in steps + 1:
+		var t: float = float(i) / float(steps)
+		var mid: Vector3 = path.call(t)
+		var along: Vector3 = ((path.call(minf(t + 0.02, 1.0)) as Vector3) - (path.call(maxf(t - 0.02, 0.0)) as Vector3)).normalized()
+		# Thick legs, thinner over the top.
+		var r: float = thick * (1.4 - 0.5 * sin(PI * t))
+		var out: Vector3 = side.cross(along)
+		var ring := PackedVector3Array()
+		for j in sides:
+			var ang: float = TAU * float(j) / float(sides)
+			ring.append(mid + (out * cos(ang) + side * sin(ang)) * r * rng.randf_range(0.82, 1.16))
+		rings.append(ring)
+		middles.append(mid)
+		radii.append(r)
+	var node := MeshInstance3D.new()
+	node.mesh = MeshKit.loft(rings)
+	node.material_override = _rock_mat
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	holder.add_child(node)
+	for i in range(0, steps, 2):
+		chunk.capsules.append([middles[i], middles[i + 2], ((radii[i] as float) + (radii[i + 2] as float)) * 0.5])
+	chunk.arches += 1
+
+
+## A giant old tree: a great flared trunk and a crown of big round masses of leaves. `reach` is
+## the crown's radius. The leaf masses go into `crowns` to be drawn with the rest of the chunk's.
+func _add_great_tree(holder: Node3D, columns: Array, at: Vector3, reach: float, rng: RandomNumberGenerator, crowns: Array) -> void:
+	var trunk_h: float = reach * 0.8
+	var girth: float = reach * 0.13
+	var rings: Array = []
+	var twist: float = rng.randf() * TAU
+	for i in 7:
+		var t: float = float(i) / 6.0
+		# Flared at the roots, a little wider again where the boughs spread.
+		var r: float = girth * (1.0 + 1.5 * pow(1.0 - t, 3.0) + 0.5 * pow(t, 4.0))
+		var ring := PackedVector3Array()
+		for j in 10:
+			var a: float = TAU * float(j) / 10.0 + twist
+			ring.append(Vector3(cos(a) * r * rng.randf_range(0.85, 1.15), t * trunk_h - 6.0, -sin(a) * r * rng.randf_range(0.85, 1.15)))
+		rings.append(ring)
+	var trunk := MeshInstance3D.new()
+	trunk.mesh = MeshKit.loft(rings)
+	trunk.material_override = _paints["bark"]
+	trunk.position = at
+	trunk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	holder.add_child(trunk)
+	# The crown: a low dome of leaf masses, biggest in the middle.
+	var heart: Vector3 = at + Vector3.UP * (trunk_h + reach * 0.12)
+	for i in 13:
+		var out: float = sqrt(rng.randf()) * 0.85 if i > 0 else 0.0
+		var ang: float = rng.randf() * TAU
+		var r: float = reach * lerpf(0.52, 0.3, out) * rng.randf_range(0.85, 1.15)
+		var where: Vector3 = heart + Vector3(cos(ang) * out * reach, (1.0 - out * out) * reach * 0.34 + rng.randf_range(-0.06, 0.06) * reach, sin(ang) * out * reach)
+		var green := Color(0.2, 0.4, 0.15).lerp(Color(0.42, 0.58, 0.2), rng.randf())
+		crowns.append([Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(r, r * 0.78, r)), where), green])
+	columns.append([at - Vector3.UP * 6.0, trunk_h + 6.0, girth * 2.0, girth * 1.2])
+	columns.append([at + Vector3.UP * trunk_h * 0.85, reach * 0.75, reach * 0.9, reach * 0.35])
 
 
 ## A round stone tower with a pointed roof. Returns the height of the top of its walls.
@@ -700,6 +836,13 @@ func _build_castle() -> void:
 	holder.add_child(mount)
 	_add_sails(mount, Vector3(0, 0, -19.5), 46.0, rng)
 
+	# The great tree: older than the castle, across the stream from it.
+	var crowns: Array = []
+	var tree_x: float = castle.x - 120.0
+	var tree_z: float = river_z(tree_x) - 260.0
+	_add_great_tree(holder, _columns, Vector3(tree_x, height_at(tree_x, tree_z), tree_z), 125.0, rng, crowns)
+	_scatter(holder, crowns, _crown, _leaf_mat)
+
 	# The town, outside the walls.
 	var walls: Array = []
 	var roofs: Array = []
@@ -715,7 +858,7 @@ func _build_castle() -> void:
 
 func _near_columns(world: Vector3) -> Array:
 	var out: Array = []
-	if Vector2(world.x - castle.x, world.z - castle.z).length() < 400.0:
+	if Vector2(world.x - castle.x, world.z - castle.z).length() < 700.0:
 		out.append_array(_columns)
 	var at: Vector2i = _key_of(world.x, world.z)
 	for dz in range(-1, 2):
@@ -748,6 +891,20 @@ func hit(world: Vector3, radius: float) -> Vector3:
 			if out.length() < 0.01:
 				out = Vector3.RIGHT
 			return out.normalized() * (reach - out.length())
+	var at: Vector2i = _key_of(world.x, world.z)
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			var chunk: Chunk = _chunks.get(Vector2i(at.x + dx, at.y + dz))
+			if chunk == null:
+				continue
+			for c: Array in chunk.capsules:
+				var nearest: Vector3 = Geometry3D.get_closest_point_to_segment(world, c[0], c[1])
+				var away: Vector3 = world - nearest
+				var reach: float = float(c[2]) + radius
+				if away.length() < reach:
+					if away.length() < 0.01:
+						away = Vector3.UP
+					return away.normalized() * (reach - away.length())
 	return Vector3.ZERO
 
 

@@ -10,6 +10,8 @@ extends Node3D
 
 const MeshKit := preload("res://scripts/mesh_kit.gd")
 const Trail := preload("res://scripts/trail.gd")
+const Toon := preload("res://scripts/toon.gd")
+const Hair := preload("res://scripts/hair.gd")
 
 var glider: Node3D
 
@@ -82,12 +84,7 @@ func _ready() -> void:
 	bulb.radial_segments = 10
 	bulb.rings = 6
 	lamp.mesh = bulb
-	var lit := StandardMaterial3D.new()
-	lit.albedo_color = Color(1.0, 0.7, 0.3)
-	lit.emission_enabled = true
-	lit.emission = Color(1.0, 0.65, 0.25)
-	lit.emission_energy_multiplier = 2.0
-	lamp.material_override = lit
+	lamp.material_override = Toon.glowing(Color(1.0, 0.7, 0.3), Color(2.0, 1.3, 0.5))
 	lamp.position = Vector3(0, -0.4, 0)
 	_lantern.add_child(lamp)
 
@@ -121,9 +118,16 @@ func _ready() -> void:
 	var locks := MeshInstance3D.new()
 	locks.mesh = ball
 	locks.material_override = hair
-	locks.scale = Vector3(1.15, 1.25, 1.1)
-	locks.position = Vector3(0, 0.88, 0.07)
+	locks.scale = Vector3(1.1, 1.08, 1.08)
+	locks.position = Vector3(0, 0.9, 0.04)
 	body.add_child(locks)
+	# Her long hair streams out from under the hat.
+	var tresses: MeshInstance3D = Hair.new()
+	tresses.anchor = head
+	tresses.root = Vector3(0, -0.02, 0.13)
+	tresses.color = Color(0.85, 0.38, 0.12)
+	tresses.width = 0.24
+	add_child(tresses)
 	# The hat: a wide brim, a cone, and a tip that flops over and whips in the wind.
 	var hat := Node3D.new()
 	hat.position = Vector3(0, 1.03, 0.0)
@@ -203,11 +207,8 @@ func _ready() -> void:
 	add_child(_trail)
 
 
-func _paint(color: Color, roughness: float) -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = roughness
-	return mat
+func _paint(color: Color, _roughness: float) -> ShaderMaterial:
+	return Toon.paint(color, 4.0)
 
 
 func _process(delta: float) -> void:

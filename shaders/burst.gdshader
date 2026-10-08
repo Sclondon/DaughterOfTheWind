@@ -10,6 +10,11 @@ render_mode unshaded, cull_disabled, fog_disabled;
 
 varying vec4 puff;
 varying vec2 p;
+varying float depth;
+
+float dither(vec2 at) {
+	return fract(52.9829189 * fract(dot(at, vec2(0.06711056, 0.00583715))));
+}
 
 void vertex() {
 	puff = INSTANCE_CUSTOM;
@@ -18,9 +23,14 @@ void vertex() {
 	float size = length(MODEL_MATRIX[0].xyz);
 	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0] * size, INV_VIEW_MATRIX[1] * size, INV_VIEW_MATRIX[2] * size, MODEL_MATRIX[3]);
 	MODELVIEW_NORMAL_MATRIX = mat3(MODELVIEW_MATRIX);
+	depth = -(MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).z;
 }
 
 void fragment() {
+	// A puff right in the lens would hide everything, so it thins out close to the camera.
+	if (smoothstep(7.0, 22.0, depth) < dither(FRAGCOORD.xy) + 0.02) {
+		discard;
+	}
 	float age = puff.x;
 	float seed = puff.y;
 	float turn = seed * 6.283 + puff.w * age;

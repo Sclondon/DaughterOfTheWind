@@ -6,19 +6,19 @@ extends Node3D
 ## It cruises straight ahead (-Z) with a slow heave. `hit()` tells the glider when it has flown
 ## into the hull or a wing and which way to push it back out.
 ##
-## Its turrets track `target` and, while `armed`, fire shells through `flak`. They lead the
-## target, so flying straight gets you hit and turning does not. The guns sit along the back of
+## Its turrets fire shells through `flak` while `armed`: at `target` (the glider) when she is in
+## range, otherwise at the nearest of `foes` (the other side's ships). They lead what they shoot
+## at, so flying straight gets you hit and turning does not. The guns sit along the back of
 ## the ship and cannot point down past the deck: underneath a ship is out of their sight.
 
 const MeshKit := preload("res://scripts/mesh_kit.gd")
 const HullShader := preload("res://shaders/hull.gdshader")
+const Toon := preload("res://scripts/toon.gd")
 
-const STRIPES := [Color(0.55, 0.16, 0.1), Color(0.62, 0.48, 0.16), Color(0.75, 0.72, 0.62)]
-const PAINTS := [
-	Color(0.33, 0.35, 0.37),  # gunmetal
-	Color(0.37, 0.34, 0.26),  # bronze
-	Color(0.27, 0.32, 0.31),  # sea green
-	Color(0.4, 0.38, 0.36),  # weathered steel
+## Each side's colours: [hull paints to pick from, the stripe].
+const LIVERY := [
+	[[Color(0.33, 0.37, 0.43), Color(0.27, 0.33, 0.36), Color(0.4, 0.42, 0.45)], Color(0.85, 0.68, 0.2)],
+	[[Color(0.5, 0.25, 0.18), Color(0.43, 0.3, 0.2), Color(0.38, 0.2, 0.17)], Color(0.9, 0.86, 0.76)],
 ]
 
 var length := 240.0
@@ -29,8 +29,12 @@ var cruise_y := 560.0
 var target: Node3D
 var flak: Node
 var armed := true
+## The other side's ships.
+var foes: Array = []
 
 const GUN_RANGE := 1100.0
+## How far the guns reach for another ship.
+const FOE_RANGE := 1900.0
 ## How far off a perfect aim a shot can go, as a slope (0.02 is about one degree).
 const GUN_SPREAD := 0.02
 
@@ -40,13 +44,13 @@ var _capsules: Array = []  # wings and tail, in local space: [Vector3 a, Vector3
 var _props: Array = []
 var _turrets: Array = []  # each [Node3D gun, float seconds until it may fire again, float barrel length]
 var _metal: ShaderMaterial
-var _dark: StandardMaterial3D
-var _glass: StandardMaterial3D
+var _dark: ShaderMaterial
+var _glass: ShaderMaterial
 var _time := 0.0
 var _phase := 0.0
 
 
-func build(ship_length: float, ship_seed: int) -> void:
+func build(ship_length: float, ship_seed: int, faction: int = 0) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = ship_seed
 	length = ship_length
@@ -55,7 +59,8 @@ func build(ship_length: float, ship_seed: int) -> void:
 	_half_h = length * rng.randf_range(0.074, 0.09)
 
 	# Wings and fittings share the plain plating; the hull gets its own copy with paintwork.
-	var paint: Color = PAINTS[rng.randi() % PAINTS.size()]
+	var paints: Array = LIVERY[faction][0]
+	var paint: Color = paints[rng.randi() % paints.size()]
 	_metal = ShaderMaterial.new()
 	_metal.shader = HullShader
 	_metal.set_shader_parameter("base_color", paint)
@@ -65,16 +70,9 @@ func build(ship_length: float, ship_seed: int) -> void:
 	hull_metal.set_shader_parameter("is_hull", true)
 	hull_metal.set_shader_parameter("hull_length", length)
 	hull_metal.set_shader_parameter("half_height", _half_h)
-	hull_metal.set_shader_parameter("stripe_color", STRIPES[rng.randi() % STRIPES.size()])
-	_dark = StandardMaterial3D.new()
-	_dark.albedo_color = Color(0.12, 0.12, 0.13)
-	_dark.metallic = 0.5
-	_dark.roughness = 0.5
-	_glass = StandardMaterial3D.new()
-	_glass.albedo_color = Color(0.1, 0.1, 0.1)
-	_glass.emission_enabled = true
-	_glass.emission = Color(1.0, 0.8, 0.45)
-	_glass.emission_energy_multiplier = 1.6
+	hull_metal.set_shader_parameter("stripe_color", LIVERY[faction][1])
+	_dark = Toon.paint(Color(0.14, 0.14, 0.16), 14.0)
+	_glass = Toon.glowing(Color(0.1, 0.1, 0.1), Color(1.6, 1.25, 0.7), 14.0)
 
 	var hull := MeshInstance3D.new()
 	hull.mesh = MeshKit.body(length, _hull_shape, 32, 36, 3.2, 0.85)
@@ -222,31 +220,56 @@ func _process(delta: float) -> void:
 
 
 func _work_guns(delta: float) -> void:
-	if target == null or flak == null:
-		return
-	var mark: Vector3 = target.global_position
-	if global_position.distance_to(mark) > GUN_RANGE + length:
+	if flak == null:
 		return
 	var shell_speed: float = flak.SHELL_SPEED
 	var to_ship: Basis = global_basis.inverse()
+	# The glider, if she is near enough to bother with.
+	var glider_near: bool = target != null and global_position.distance_to(target.global_position) < GUN_RANGE + length
+	# And the nearest enemy ship.
+	var foe: Node3D = null
+	var foe_away: float = FOE_RANGE
+	for other: Node3D in foes:
+		var away: float = global_position.distance_to(other.global_position)
+		if away < foe_away:
+			foe_away = away
+			foe = other
+	if not glider_near and foe == null:
+		return
 	for turret: Array in _turrets:
 		var gun: Node3D = turret[0]
 		var from: Vector3 = gun.global_position
-		# Aim where she will be when the shell gets there.
+		turret[1] = (turret[1] as float) - delta
+		# She comes first; otherwise the enemy ship.
+		var mark := Vector3.ZERO
+		var mark_velocity := Vector3.ZERO
+		var at_ship := false
+		if glider_near and from.distance_to(target.global_position) < GUN_RANGE:
+			mark = target.global_position
+			mark_velocity = target.velocity
+		elif foe != null:
+			mark = foe.global_position + Vector3(0, foe.length * 0.03, 0)
+			mark_velocity = -foe.global_basis.z * (foe.speed as float)
+			at_ship = true
+		else:
+			continue
+		# Aim where it will be when the shell gets there.
 		var flight: float = from.distance_to(mark) / shell_speed
-		var ahead: Vector3 = mark + (target.velocity as Vector3) * flight
+		var ahead: Vector3 = mark + mark_velocity * flight
 		flight = from.distance_to(ahead) / shell_speed
 		var aim: Vector3 = (to_ship * (ahead - from)).normalized()
-		turret[1] = (turret[1] as float) - delta
-		# The guns cannot point down through their own deck, or reach past their range.
-		if aim.y < -0.06 or aim.y > 0.97 or from.distance_to(mark) > GUN_RANGE:
+		# The guns cannot point down through their own deck.
+		if aim.y < -0.06 or aim.y > 0.97:
 			continue
 		gun.basis = gun.basis.orthonormalized().slerp(Basis.looking_at(aim, Vector3.UP), 1.0 - exp(-2.5 * delta))
 		if armed and (turret[1] as float) <= 0.0 and (-gun.basis.z).dot(aim) > 0.996:
-			turret[1] = randf_range(2.0, 3.6)
-			var wild := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * GUN_SPREAD
+			# Ship against ship is slower, wilder fire, fused to burst just short of the hull.
+			turret[1] = randf_range(3.0, 6.0) if at_ship else randf_range(2.0, 3.6)
+			var spread: float = GUN_SPREAD * (2.5 if at_ship else 1.0)
+			var wild := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * spread
 			var dir: Vector3 = (global_basis * (aim + wild)).normalized()
-			flak.fire(from + dir * (turret[2] as float), dir * shell_speed, flight * randf_range(0.94, 1.05))
+			var fuse: float = flight * (randf_range(0.84, 0.97) if at_ship else randf_range(0.94, 1.05))
+			flak.fire(from + dir * (turret[2] as float), dir * shell_speed, fuse)
 
 
 func _physics_process(delta: float) -> void:

@@ -41,6 +41,7 @@ class StickView extends Control:
 
 
 func _ready() -> void:
+	layer = 2
 	_white = ColorRect.new()
 	_white.color = Color(0.95, 0.97, 1.0, 0.0)
 	_white.set_anchors_preset(Control.PRESET_FULL_RECT)

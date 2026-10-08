@@ -4,14 +4,19 @@ shader_type spatial;
 // the mesh says there are farms (vertex colour red, see coast.gd), or beach sand (green). Steep
 // ground is banded cliff rock.
 
+#include "toon.gdshaderinc"
+
 uniform sampler2D noise_tex : repeat_enable, filter_linear_mipmap;
 // The spires use this shader too, but have no farm data in their vertices.
 uniform bool use_farms = true;
+// Where the valley meets the sea (z). The stream below repeats coast.gd's river_z().
+uniform float valley_z = 0.0;
 
 varying vec3 w_pos;
 varying vec3 w_normal;
 varying float farm;
 varying float sand;
+varying float stream;
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -22,6 +27,7 @@ void vertex() {
 	w_normal = normalize(mat3(MODEL_MATRIX) * NORMAL);
 	farm = COLOR.r;
 	sand = COLOR.g;
+	stream = COLOR.b;
 }
 
 void fragment() {
@@ -32,9 +38,20 @@ void fragment() {
 
 	vec3 col = mix(vec3(0.27, 0.47, 0.17), vec3(0.47, 0.6, 0.22), wide) * mix(0.86, 1.1, fine);
 
+	// Flower meadows: drifts of colour across the grass, and the flowers themselves close to.
+	float drift = smoothstep(0.52, 0.66, texture(noise_tex, w_pos.xz / 310.0 + vec2(0.4, 0.1)).r);
+	float which = texture(noise_tex, w_pos.xz / 700.0 + vec2(0.7, 0.3)).r;
+	vec3 bloom = which < 0.42 ? vec3(0.95, 0.85, 0.3) : (which < 0.56 ? vec3(0.92, 0.55, 0.7) : vec3(0.93, 0.93, 0.85));
+	col = mix(col, bloom, drift * 0.28);
+	vec2 cell = floor(w_pos.xz / 2.2);
+	float speck = step(0.72, hash(cell)) * (1.0 - smoothstep(0.1, 0.3, length(fract(w_pos.xz / 2.2) - 0.5)));
+	col = mix(col, bloom * 1.1, speck * drift * near);
+
 	if (use_farms) {
 		// Fields: a slanted grid of plots, each its own crop, with hedges between them.
-		vec2 p = mat2(vec2(0.92, 0.39), vec2(-0.39, 0.92)) * w_pos.xz / vec2(64.0, 40.0);
+		// (The plots are pulled about a little, so they look hand-drawn, not ruled.)
+		vec2 wobble = (texture(noise_tex, w_pos.xz / 330.0).rg - 0.5) * 34.0;
+		vec2 p = mat2(vec2(0.92, 0.39), vec2(-0.39, 0.92)) * (w_pos.xz + wobble) / vec2(64.0, 40.0);
 		p.x += floor(p.y) * 0.37;
 		vec2 id = floor(p);
 		vec2 f = fract(p);
@@ -58,6 +75,13 @@ void fragment() {
 	}
 
 	if (use_farms) {
+		// The stream: a ribbon of water down the valley, with darker, greener banks.
+		float river_z = valley_z + 260.0 * sin(w_pos.x / 1700.0 + 0.5) + 55.0 * sin(w_pos.x / 160.0 + 1.0);
+		float from_stream = abs(w_pos.z - river_z) + (fine - 0.5) * 7.0;
+		col = mix(col, vec3(0.2, 0.42, 0.16), (1.0 - smoothstep(10.0, 24.0, from_stream)) * stream * 0.7);
+		float glint = step(0.62, texture(noise_tex, w_pos.xz / 23.0 + vec2(TIME * 0.05, 0.0)).r);
+		vec3 water = mix(vec3(0.2, 0.5, 0.72), vec3(0.62, 0.84, 0.92), glint * 0.6);
+		col = mix(col, water, (1.0 - smoothstep(6.0, 8.0, from_stream)) * stream);
 		col = mix(col, vec3(0.9, 0.82, 0.62) * mix(0.93, 1.05, fine), smoothstep(0.3, 0.7, sand));
 	}
 
@@ -69,6 +93,9 @@ void fragment() {
 	// Wet and dark where the sea washes the foot of the cliffs.
 	col = mix(col * 0.55, col, smoothstep(-2.0, 7.0, w_pos.y));
 
-	ALBEDO = col;
-	ROUGHNESS = 0.95;
+	// Two washes: a wide one over the whole country, and a closer one.
+	col = wash(col, w_pos, w_normal, 520.0);
+	ALBEDO = mix(col, wash(col, w_pos, w_normal, 90.0), near * 0.6);
+	ROUGHNESS = 1.0;
+	SPECULAR = 0.0;
 }

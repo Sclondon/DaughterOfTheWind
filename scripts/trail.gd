@@ -81,7 +81,7 @@ func _process(_delta: float) -> void:
 		side = side.normalized() * width * (0.6 + s) * (1.0 + age * 1.5)
 		# Vapour right in front of the lens would fill the screen, so it thins out near the camera.
 		var close: float = smoothstep(3.0, 8.0, eye.distance_to(p))
-		var color := Color(tint.r, tint.g, tint.b, s * (1.0 - age) * (1.0 - age) * 0.75 * close)
+		var color := Color(tint.r, tint.g, tint.b, s * (1.0 - age) * (1.0 - age) * 0.55 * close)
 		_mesh.surface_set_color(color)
 		_mesh.surface_add_vertex(p + side)
 		_mesh.surface_set_color(color)

@@ -1,23 +1,27 @@
 extends Node3D
-## What the glider looks like: a flat white wing made of panels with big round tips, a teardrop
+## What the glider looks like: a flat white wing made of panels with short round tips that hook back, a teardrop
 ## pod in the middle with a jet in its tail, two hoops with a strap between them to hold on to,
 ## and a small pilot in blue lying along the top. All of it is built here from MeshKit shapes.
 ##
 ## The wing is in separate pieces so it can move with the flying:
 ##   - each side's rear flap swings up or down with the stick (both for pitch, opposite for roll)
-##   - each round tip twists with the roll and bends up when the wing is loaded in a turn or pull-up
-##   - the whole wing half flexes a little with the load
+## Nothing else on the wing moves. The pilot is a girl whose long hair streams behind her like a
+## scarf (hair.gd).
 ## It also owns the jet flame and the two wingtip vapour trails. Each trail is as strong as the
 ## lift its own tip is making, so the tip on the outside of a turn or on the down-going side of a
 ## roll streams first, and both stream at speed.
 
 const MeshKit := preload("res://scripts/mesh_kit.gd")
 const Trail := preload("res://scripts/trail.gd")
+const Toon := preload("res://scripts/toon.gd")
+const Hair := preload("res://scripts/hair.gd")
 
 ## Where the pod ends and the wing panels begin, where the round tips hinge on, and how long they are.
 const ROOT := 0.3
 const TIP_HINGE := 1.98
-const TIP_LENGTH := 1.0
+const TIP_LENGTH := 0.66
+## How far the very end of the tip is swept back.
+const HOOK := 0.36
 ## Leading and trailing edge of the wing (forward is -Z), and where the flap hinges.
 const LEAD := -0.62
 const TRAIL_EDGE := 0.58
@@ -119,8 +123,11 @@ func _build_half(side: float, white: Material) -> void:
 	var reach: float = (TRAIL_EDGE - LEAD) * 0.5
 	var tip_mesh := MeshInstance3D.new()
 	tip_mesh.mesh = MeshKit.slab(xs, func(x: float) -> Vector2:
-		var w: float = sqrt(maxf(1.0 - pow(absf(x) / TIP_LENGTH, 2.0), 0.0))
-		return Vector2(mid - reach * w, mid + reach * w), THICK, 8)
+		var out: float = absf(x) / TIP_LENGTH
+		var w: float = sqrt(maxf(1.0 - out * out, 0.0))
+		# Round, but with the end drawn back into a hook: the leading edge sweeps back furthest.
+		var back: float = HOOK * out * out
+		return Vector2(mid - reach * w + back * 1.5, mid + reach * w + back * 0.9), THICK, 8)
 	tip_mesh.material_override = white
 	tip.add_child(tip_mesh)
 
@@ -136,7 +143,7 @@ func _build_half(side: float, white: Material) -> void:
 
 	var trail: MeshInstance3D = Trail.new()
 	trail.source = tip
-	trail.offset = Vector3(TIP_LENGTH * 0.97 * side, 0, mid + 0.1)
+	trail.offset = Vector3(TIP_LENGTH * 0.96 * side, 0, mid + HOOK * 1.15)
 	add_child(trail)
 	_halves.append([half, flap, tip, trail, side])
 
@@ -182,9 +189,15 @@ func _build_pilot() -> void:
 	var mop := MeshInstance3D.new()
 	mop.mesh = ball
 	mop.material_override = hair
-	mop.scale = Vector3(1.1, 1.05, 1.1)
-	mop.position = Vector3(0, 0.65, 0.03)
+	mop.scale = Vector3(1.08, 1.02, 1.08)
+	mop.position = Vector3(0, 0.645, 0.02)
 	_pilot.add_child(mop)
+	# Her long hair, pinned at the back of her head.
+	var tresses: MeshInstance3D = Hair.new()
+	tresses.anchor = head
+	tresses.root = Vector3(0, 0.05, 0.1)
+	tresses.color = Color(0.55, 0.27, 0.14)
+	add_child(tresses)
 	for side: float in [-1.0, 1.0]:
 		# Hands on the front legs of the hoops.
 		_pilot.add_child(MeshKit.rod(Vector3(0.17 * side, 0.48, 0.12), Vector3(0.2 * side, 0.42, -0.34), 0.045, tunic))
@@ -192,11 +205,8 @@ func _build_pilot() -> void:
 		_pilot.add_child(MeshKit.rod(Vector3(0.11 * side, 0.3, 1.22), Vector3(0.12 * side, 0.29, 1.54), 0.06, boots))
 
 
-func _paint(color: Color, roughness: float) -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = roughness
-	return mat
+func _paint(color: Color, _roughness: float) -> ShaderMaterial:
+	return Toon.paint(color, 4.0)
 
 
 func _process(delta: float) -> void:
@@ -204,7 +214,6 @@ func _process(delta: float) -> void:
 		return
 	var blend: float = 1.0 - exp(-10.0 * delta)
 	var stick: Vector2 = glider.control
-	var pull: float = glider.load_factor
 
 	# The pilot leans into the turn.
 	var bank: float = atan2(-glider.basis.x.y, glider.basis.y.y)
@@ -219,7 +228,6 @@ func _process(delta: float) -> void:
 
 	var body: Transform3D = glider.get_global_transform_interpolated()
 	for i in _halves.size():
-		var half: Node3D = _halves[i][0]
 		var flap: Node3D = _halves[i][1]
 		var tip: Node3D = _halves[i][2]
 		var trail: MeshInstance3D = _halves[i][3]
@@ -229,11 +237,6 @@ func _process(delta: float) -> void:
 		# (Turning about +X swings a trailing edge down, so "up" is a negative angle.)
 		var deflect: float = clampf(stick.y * 0.42 + stick.x * side * 0.5, -0.65, 0.65)
 		flap.rotation.x = lerpf(flap.rotation.x, -deflect, blend)
-		# The tips warp the same way, and bend up under load.
-		tip.rotation.x = lerpf(tip.rotation.x, -stick.x * side * 0.3, blend)
-		var bend: float = clampf((pull - 1.0) * 0.09, -0.1, 0.24)
-		tip.rotation.z = lerpf(tip.rotation.z, bend * side, blend * 0.6)
-		half.rotation.z = lerpf(half.rotation.z, clampf((pull - 1.0) * 0.03, -0.03, 0.08) * side, blend * 0.6)
 
 		# How hard is this tip working? Take its own speed through the air (the tip on the outside
 		# of a turn moves faster, the one going down in a roll meets the air at a steeper angle)

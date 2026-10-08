@@ -5,6 +5,10 @@ extends Node3D
 ##
 ## It cruises straight ahead (-Z) with a slow heave. `hit()` tells the glider when it has flown
 ## into the hull or a wing and which way to push it back out.
+##
+## Its turrets track `target` and, while `armed`, fire shells through `flak`. They lead the
+## target, so flying straight gets you hit and turning does not. The guns sit along the back of
+## the ship and cannot point down past the deck: underneath a ship is out of their sight.
 
 const MeshKit := preload("res://scripts/mesh_kit.gd")
 const HullShader := preload("res://shaders/hull.gdshader")
@@ -21,11 +25,20 @@ var length := 240.0
 var speed := 13.0
 var heading := 0.0
 var cruise_y := 560.0
+## What the turrets shoot at (the glider; it needs `velocity`), where the shells go, and whether to fire.
+var target: Node3D
+var flak: Node
+var armed := true
+
+const GUN_RANGE := 1100.0
+## How far off a perfect aim a shot can go, as a slope (0.02 is about one degree).
+const GUN_SPREAD := 0.02
 
 var _half_w := 20.0
 var _half_h := 17.0
 var _capsules: Array = []  # wings and tail, in local space: [Vector3 a, Vector3 b, float radius]
 var _props: Array = []
+var _turrets: Array = []  # each [Node3D gun, float seconds until it may fire again, float barrel length]
 var _metal: ShaderMaterial
 var _dark: StandardMaterial3D
 var _glass: StandardMaterial3D
@@ -191,15 +204,49 @@ func _add_turrets(rng: RandomNumberGenerator) -> void:
 		dome.material_override = _metal
 		dome.position = at
 		add_child(dome)
-		var aim := Vector3(rng.randf_range(-0.5, 0.5), 0.35, -1.0).normalized()
+		# The gun: a pivot in the dome with twin barrels along its -Z.
+		var gun := Node3D.new()
+		gun.position = at + Vector3(0, radius * 0.4, 0)
+		gun.basis = Basis.looking_at(Vector3(rng.randf_range(-0.5, 0.5), 0.35, -1.0).normalized(), Vector3.UP)
+		add_child(gun)
 		for side: float in [-1.0, 1.0]:
-			var from: Vector3 = at + Vector3(radius * 0.3 * side, radius * 0.4, 0)
-			add_child(MeshKit.rod(from, from + aim * radius * 2.6, radius * 0.09, _dark))
+			var from := Vector3(radius * 0.3 * side, 0, 0)
+			gun.add_child(MeshKit.rod(from, from + Vector3(0, 0, -radius * 2.6), radius * 0.09, _dark))
+		_turrets.append([gun, rng.randf_range(1.0, 4.0), radius * 2.8])
 
 
 func _process(delta: float) -> void:
 	for prop: Node3D in _props:
 		prop.rotate_object_local(Vector3.BACK, delta * 14.0)
+	_work_guns(delta)
+
+
+func _work_guns(delta: float) -> void:
+	if target == null or flak == null:
+		return
+	var mark: Vector3 = target.global_position
+	if global_position.distance_to(mark) > GUN_RANGE + length:
+		return
+	var shell_speed: float = flak.SHELL_SPEED
+	var to_ship: Basis = global_basis.inverse()
+	for turret: Array in _turrets:
+		var gun: Node3D = turret[0]
+		var from: Vector3 = gun.global_position
+		# Aim where she will be when the shell gets there.
+		var flight: float = from.distance_to(mark) / shell_speed
+		var ahead: Vector3 = mark + (target.velocity as Vector3) * flight
+		flight = from.distance_to(ahead) / shell_speed
+		var aim: Vector3 = (to_ship * (ahead - from)).normalized()
+		turret[1] = (turret[1] as float) - delta
+		# The guns cannot point down through their own deck, or reach past their range.
+		if aim.y < -0.06 or aim.y > 0.97 or from.distance_to(mark) > GUN_RANGE:
+			continue
+		gun.basis = gun.basis.orthonormalized().slerp(Basis.looking_at(aim, Vector3.UP), 1.0 - exp(-2.5 * delta))
+		if armed and (turret[1] as float) <= 0.0 and (-gun.basis.z).dot(aim) > 0.996:
+			turret[1] = randf_range(2.0, 3.6)
+			var wild := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * GUN_SPREAD
+			var dir: Vector3 = (global_basis * (aim + wild)).normalized()
+			flak.fire(from + dir * (turret[2] as float), dir * shell_speed, flight * randf_range(0.94, 1.05))
 
 
 func _physics_process(delta: float) -> void:

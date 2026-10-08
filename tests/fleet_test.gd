@@ -31,6 +31,8 @@ func _run() -> void:
 	var fleet: Node3D = main.fleet
 	main.input.manual = true
 	glider.air = []
+	# Hold fire for the collision checks; the guns get their own check at the end.
+	fleet.armed = false
 	glider.bumped.connect(func() -> void: bumps += 1)
 	_check("a convoy is flying", fleet.ships.size() == 5, "%d ships" % fleet.ships.size())
 
@@ -62,6 +64,22 @@ func _run() -> void:
 		await physics_frame
 	var gap: float = flagship.position.distance_to(glider.position)
 	_check("the convoy finds her again", gap < 6000.0, "flagship %.0f m away" % gap)
+
+	# The guns: fly straight and level past the flagship, above its deck, and it should open fire,
+	# with the shells bursting close by.
+	fleet.armed = true
+	var flak: Node3D = fleet.flak
+	glider.reset(flagship.position + flagship.global_basis * Vector3(180, 110, 420), flagship.heading)
+	var top: Node3D = flagship._turrets[0][0]
+	var aim: float = -1.0
+	for i in 600:
+		await physics_frame
+		await process_frame
+		# (She may be shot down and start again far away, so judge the aim as it goes.)
+		aim = maxf(aim, (-top.global_basis.z).dot((glider.position - top.global_position).normalized()))
+	_check("the turrets fire at her", flak.shots_fired > 10 and flak.bursts + flak.hits > 5 and flak.closest < 30.0,
+			"%d shots, %d bursts, %d hits, closest %.1f m, health %d" % [flak.shots_fired, flak.bursts, flak.hits, flak.closest, glider.health])
+	_check("the turrets track her", aim > 0.9, "aim %.2f" % aim)
 
 	print("fleet_test: %d passed, %d failed" % [passed, failed])
 	quit(1 if failed > 0 else 0)

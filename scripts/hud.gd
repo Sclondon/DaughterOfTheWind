@@ -5,12 +5,14 @@ extends CanvasLayer
 ## and switches to the next one.
 
 signal level_pressed
+signal rider_pressed
 
 var glider: Node3D
 var input: Node
 ## 0..1, set by main: how deep in cloud the camera is.
 var whiteout := 0.0
 var level_name := ""
+var rider_name := ""
 
 var _white: ColorRect
 var _stats: Label
@@ -19,6 +21,8 @@ var _title: Label
 var _help: Label
 var _stick: Control
 var _age := 0.0
+var _hurt: ColorRect
+var _hearts: Label
 
 
 class StickView extends Control:
@@ -43,6 +47,12 @@ func _ready() -> void:
 	_white.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_white)
 
+	_hurt = ColorRect.new()
+	_hurt.color = Color(1.0, 0.25, 0.15, 0.0)
+	_hurt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hurt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_hurt)
+
 	_stick = StickView.new()
 	_stick.input = input
 	_stick.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -51,6 +61,10 @@ func _ready() -> void:
 
 	_stats = _label(20, HORIZONTAL_ALIGNMENT_LEFT)
 	_pin(_stats, 0.0, 1.0, 0.0, 1.0, Rect2(24, -100, 300, 60))
+
+	_hearts = _label(20, HORIZONTAL_ALIGNMENT_LEFT)
+	_hearts.add_theme_color_override("font_color", Color(1.0, 0.5, 0.45))
+	_pin(_hearts, 0.0, 1.0, 0.0, 1.0, Rect2(24, -132, 300, 30))
 
 	_fuel = ProgressBar.new()
 	_fuel.show_percentage = false
@@ -85,6 +99,16 @@ func _ready() -> void:
 	add_child(level)
 	_pin(level, 1.0, 0.0, 1.0, 0.0, Rect2(-236, 16, 220, 36))
 
+	var rider := Button.new()
+	rider.text = "%s  ›" % rider_name
+	rider.focus_mode = Control.FOCUS_NONE
+	rider.add_theme_font_size_override("font_size", 16)
+	for state: String in ["normal", "hover", "pressed"]:
+		rider.add_theme_stylebox_override(state, plate)
+	rider.pressed.connect(func() -> void: rider_pressed.emit())
+	add_child(rider)
+	_pin(rider, 1.0, 0.0, 1.0, 0.0, Rect2(-136, 60, 120, 36))
+
 	_title = _label(54, HORIZONTAL_ALIGNMENT_CENTER)
 	_title.text = "Daughter of the Wind"
 	_pin(_title, 0.0, 0.0, 1.0, 0.0, Rect2(0, 64, 0, 76))
@@ -110,6 +134,11 @@ func _pin(control: Control, left: float, top: float, right: float, bottom: float
 	control.offset_bottom = rect.position.y + rect.size.y
 
 
+## A red wash over the screen when a shell strikes.
+func flash() -> void:
+	_hurt.color.a = 0.45
+
+
 func _label(size: int, align: HorizontalAlignment) -> Label:
 	var label := Label.new()
 	label.add_theme_font_size_override("font_size", size)
@@ -125,6 +154,7 @@ func _label(size: int, align: HorizontalAlignment) -> Label:
 func _process(delta: float) -> void:
 	_age += delta
 	_white.color.a = whiteout * 0.9
+	_hurt.color.a = maxf(_hurt.color.a - delta * 1.2, 0.0)
 	var fade: float = 1.0 - smoothstep(6.0, 9.0, _age)
 	_title.modulate.a = fade
 	_help.modulate.a = fade
@@ -136,3 +166,5 @@ func _process(delta: float) -> void:
 	var arrow: String = "▲" if climb > 0.5 else ("▼" if climb < -0.5 else "–")
 	_stats.text = "%d km/h\n%d m  %s %.1f" % [int(glider.airspeed * 3.6), int(glider.position.y), arrow, absf(climb)]
 	_fuel.value = glider.burn
+	_hearts.text = "♥".repeat(glider.health)
+	_hearts.visible = glider.health < glider.MAX_HEALTH

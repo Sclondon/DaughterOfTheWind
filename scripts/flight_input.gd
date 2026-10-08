@@ -9,6 +9,7 @@ extends Node
 signal reset_pressed
 signal weather_pressed(index: int)
 signal level_pressed
+signal rider_pressed
 
 const STICK_RADIUS := 110.0
 const DEADZONE := 0.18
@@ -52,6 +53,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				reset_pressed.emit()
 			KEY_L:
 				level_pressed.emit()
+			KEY_G:
+				rider_pressed.emit()
 			KEY_1:
 				weather_pressed.emit(0)
 			KEY_2:

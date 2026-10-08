@@ -32,14 +32,15 @@ func _save(shot: String) -> void:
 func _coast_shots() -> void:
 	var glider: Node3D = main.glider
 	var coast: Node3D = main.coast
-	var rz: float = coast.RZ
-	# Along the south cliffs, over the village, over the farms, and the whole island from high up.
+	var c: Vector3 = coast.castle
+	# Along the cliffs, the terraces close up, the valley from the sea, the castle, and from high up.
 	var views := [
-		["20_cliffs", Vector3(-1400, 260, rz + 260), 1.35],
-		["21_village", Vector3(-900, 300, rz + 150), -0.9],
-		["22_farms", Vector3(600, 480, 900), 0.5],
-		["23_island", Vector3(-3000, 1500, rz + 4200), -0.5],
-		["24_spires", Vector3(2500, 150, rz + 1300), 0.9],
+		["20_cliffs", Vector3(-700, 300, 3600), 0.25],
+		["21_terraces", Vector3(-150, 420, 2600), -0.5],
+		["22_valley", Vector3(-1500, 260, 150), -PI * 0.5],
+		["23_castle", Vector3(c.x - 900, c.y + 230, c.z + 250), -PI * 0.5 + 0.25],
+		["24_high", Vector3(-3500, 1900, 2500), -1.1],
+		["26_top", Vector3(1800, 1000, -2500), -1.0],
 	]
 	for view: Array in views:
 		glider.reset(view[1], view[2])
@@ -47,8 +48,30 @@ func _coast_shots() -> void:
 		main.clouds.prewarm()
 		await _wait(50)
 		await _save(view[0])
-	_view(Vector3(-700, 300, rz + 500), Vector3(-500, 190, rz - 300), 55.0)
-	await _save("25_village_from_sea")
+	_view(Vector3(c.x - 330, c.y + 150, c.z + 300), c + Vector3(0, 70, 0), 55.0)
+	await _save("25_castle_close")
+	# The convoy opening fire: fly past the flagship above its deck.
+	var flagship: Node3D = main.fleet.ships[0]
+	main.cam.make_current()
+	glider.reset(flagship.position + flagship.global_basis * Vector3(170, 90, 520), flagship.heading)
+	main.cam.snap()
+	for i in 12:
+		await _wait(22)
+		glider.health = 5
+	await _save("27_flak")
+	await _wait(14)
+	await _save("28_flak")
+	# An explosion close up, early and late.
+	main.fleet.armed = false
+	glider.reset(Vector3(-3000, 600, 6000), -PI * 0.5)
+	main.cam.snap()
+	await _wait(30)
+	main.fleet.flak.burst(glider.position - glider.basis.z * 34.0 + Vector3(9, 5, 0))
+	await _wait(9)
+	await _save("29_burst_early")
+	main.fleet.flak.burst(glider.position - glider.basis.z * 30.0 + Vector3(-12, 2, 0))
+	await _wait(22)
+	await _save("30_burst_late")
 
 
 ## Look at a point from an offset, with a separate camera.
@@ -64,6 +87,8 @@ func _run() -> void:
 	# "-- <folder> coast" shoots the coast level instead.
 	if OS.get_cmdline_user_args().size() > 1:
 		main.level = OS.get_cmdline_user_args()[1]
+	if OS.get_cmdline_user_args().size() > 2:
+		main.rider = OS.get_cmdline_user_args()[2]
 	root.add_child(main)
 	await _wait(2)
 	var glider: Node3D = main.glider

@@ -130,5 +130,23 @@ func _run() -> void:
 	await _fly(20.0, Vector2.ZERO)
 	_check("the cloud sea carries her back up", glider.position.y > 10.0, "height %.1f m" % glider.position.y)
 
+	# The witch on her broom is the same flight with a different rider.
+	var other: Node3D = Main.instantiate()
+	other.rider = "witch"
+	other.use_fleet = false
+	other.use_pads = false
+	other.show_hud = false
+	main.queue_free()
+	await process_frame
+	root.add_child(other)
+	await physics_frame
+	other.input.manual = true
+	other.glider.air = []
+	other.glider.reset(Vector3(0, 3000, 0))
+	for i in 1800:
+		await physics_frame
+	_check("the witch flies the same glide", other.glider.model.get_script() == other.glider.WitchModel and absf(other.glider.airspeed - 30.4) < 1.0,
+			"speed %.1f m/s" % other.glider.airspeed)
+
 	print("flight_test: %d passed, %d failed" % [passed, failed])
 	quit(1 if failed > 0 else 0)

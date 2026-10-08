@@ -9,8 +9,12 @@ extends Node3D
 ## ridge lift), and everything in `solids` (the fleet, the land) pushes it back out through `hit()`.
 
 signal bumped
+## Struck by a shell. `downed` follows if that was the last of her health.
+signal hurt
+signal downed
 
 const GliderModel := preload("res://scripts/glider_model.gd")
+const WitchModel := preload("res://scripts/witch_model.gd")
 
 const GRAVITY := 9.8
 ## Lift per unit of lift coefficient per (m/s)^2. With CL0 this sets the hands-off glide near 30 m/s.
@@ -42,8 +46,14 @@ const BURN_TIME := 4.5
 const RECHARGE_TIME := 9.0
 const MAX_SPEED := 110.0
 const BODY_RADIUS := 2.2
+const MAX_HEALTH := 5
+## Seconds unhurt before health starts to come back, then seconds per point.
+const MEND_WAIT := 9.0
+const MEND_EVERY := 5.0
 
 var input: Node
+## What is seen flying: "glider" or "witch". The flight is the same either way. Set before _ready.
+var rider := "glider"
 ## Nodes with wind_at(world) -> Vector3. Their winds add up.
 var air: Array = []
 ## Nodes with hit(world, radius) -> Vector3 (the push that gets a ball out of them, or ZERO).
@@ -53,6 +63,8 @@ var velocity := Vector3(0, 0, -31)
 ## Jet fuel, 0..1. It refills when you are not burning it.
 var burn := 1.0
 var boosting := false
+var health := MAX_HEALTH
+var _mend := 0.0
 
 # Read by the camera, HUD, trails and tests.
 var airspeed := 31.0
@@ -72,7 +84,7 @@ var _last_air_dir := Vector3.ZERO
 
 
 func _ready() -> void:
-	model = GliderModel.new()
+	model = WitchModel.new() if rider == "witch" else GliderModel.new()
 	model.glider = self
 	add_child(model)
 
@@ -85,7 +97,26 @@ func reset(at: Vector3, heading: float = 0.0) -> void:
 	_burn_locked = false
 	_stick = Vector2.ZERO
 	_last_air_dir = Vector3.ZERO
+	health = MAX_HEALTH
+	_mend = 0.0
 	reset_physics_interpolation()
+
+
+## A shell has struck her: lose a point of health and get knocked along.
+func take_hit(push: Vector3) -> void:
+	if health <= 0:
+		return
+	health -= 1
+	_mend = -MEND_WAIT
+	velocity += push
+	hurt.emit()
+	if health <= 0:
+		downed.emit()
+
+
+## An explosion close by: thrown about, but unhurt.
+func shove(push: Vector3) -> void:
+	velocity += push
 
 
 func _physics_process(dt: float) -> void:
@@ -189,6 +220,12 @@ func _physics_process(dt: float) -> void:
 				velocity -= n * into * 1.5
 				velocity *= 0.8
 			bumped.emit()
+
+	if health < MAX_HEALTH:
+		_mend += dt
+		if _mend >= MEND_EVERY:
+			_mend = 0.0
+			health += 1
 
 	airspeed = speed
 	load_factor = q * cl / GRAVITY

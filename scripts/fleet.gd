@@ -4,6 +4,7 @@ extends Node3D
 ## a new course, so there are always ships somewhere on the horizon.
 
 const Airship := preload("res://scripts/airship.gd")
+const Flak := preload("res://scripts/flak.gd")
 
 ## Where each ship flies relative to the flagship (x right, y up, z behind), and how long it is.
 const FORMATION := [
@@ -19,16 +20,33 @@ const SPEED := 13.0
 var focus: Node3D
 var ships: Array = []
 var fleet_seed := 77
+## The lowest and highest the convoy cruises when it comes round again.
+var floor_y := 420.0
+var ceiling_y := 900.0
+## The shells and explosions of every gun in the fleet.
+var flak: Node3D
+## False holds fire (the guns still track).
+var armed := true:
+	set(value):
+		armed = value
+		for ship: Node3D in ships:
+			ship.armed = value
 
 var _rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
 	_rng.seed = fleet_seed
+	flak = Flak.new()
+	flak.target = focus
+	add_child(flak)
 	for i in FORMATION.size():
 		var ship: Node3D = Airship.new()
 		ship.build(FORMATION[i][1], fleet_seed * 100 + i)
 		ship.speed = SPEED
+		ship.target = focus
+		ship.flak = flak
+		ship.armed = armed
 		add_child(ship)
 		ships.append(ship)
 
@@ -60,7 +78,7 @@ func _physics_process(_delta: float) -> void:
 	var heading: float = glider_heading + _rng.randf_range(0.5, 1.1) * (1.0 if _rng.randf() < 0.5 else -1.0)
 	var along := Vector3(-sin(heading), 0.0, -cos(heading))
 	var meet: Vector3 = focus.position + ahead * 3200.0
-	meet.y = clampf(focus.position.y + _rng.randf_range(-80.0, 120.0), 420.0, 900.0)
+	meet.y = clampf(focus.position.y + _rng.randf_range(-80.0, 120.0), floor_y, ceiling_y)
 	place(meet - along * 1400.0, heading)
 
 

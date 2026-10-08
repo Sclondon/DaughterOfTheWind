@@ -3,10 +3,14 @@ extends Node3D
 ##
 ## The whole world is put together here in code: the painted sky and the sun, the cloud manager,
 ## the glider with its input and camera, the HUD, and whatever the level adds on top:
-##   "clouds"  the sea of clouds, with the airship fleet
-##   "coast"   an ocean and a grassy island of cliffs, farms, windmills and rock spires (coast.gd)
+##   "clouds"  the sea of clouds
+##   "coast"   the sea, and an endless wall of towering terraced cliffs with farms, hamlets and
+##             windmills on the ledges, and a valley running down to a beach with the castle in it
+##             (coast.gd)
+## Both have the airship fleet, whose guns fire on the glider. Shot down, she starts again.
 ## This script also fades the view to white when the camera is inside a cloud, and handles
-## restart (R), the weather keys (1 / 2 / 3) and switching level (L, or the button on the HUD).
+## restart (R), the weather keys (1 / 2 / 3), switching level (L, or the button on the HUD) and
+## switching rider between the glider and the witch on her broom (G, or its button).
 ##
 ## Tests set the exported switches below before adding the scene to the tree.
 
@@ -21,6 +25,7 @@ const SkyShader := preload("res://shaders/sky.gdshader")
 
 const LEVELS := ["clouds", "coast"]
 const LEVEL_NAMES := {"clouds": "Sea of Clouds", "coast": "The Windward Coast"}
+const RIDER_NAMES := {"glider": "Glider", "witch": "Witch"}
 const ZENITH := Color(0.09, 0.29, 0.7)
 const HAZE := Color(0.73, 0.85, 0.96)
 const SUN := Color(1.0, 0.95, 0.82)
@@ -28,9 +33,12 @@ const HAZE_DISTANCE := 8500.0
 
 ## The level picked last, kept across a scene reload.
 static var chosen := "clouds"
+static var chosen_rider := "glider"
 
 ## Which level to build. Empty means the one picked last.
 @export var level := ""
+## "glider" or "witch". Empty means the one picked last.
+@export var rider := ""
 ## False flies an empty sky (no ships), for tests of the flight alone.
 @export var use_fleet := true
 ## False ignores gamepads, so a stuck stick cannot steer a test.
@@ -48,9 +56,13 @@ var fleet: Node3D
 var coast: Node3D
 var hud: CanvasLayer
 var start := Vector3(0, 620, 0)
+var start_heading := 0.0
 
 var _env: Environment
 var _whiteout := 0.0
+# Where the convoy starts, from where the glider starts, and which way it sails.
+var _fleet_from := Vector3(260, -70, -1150)
+var _fleet_heading := 0.22
 
 
 func _ready() -> void:
@@ -58,7 +70,10 @@ func _ready() -> void:
 		level = chosen
 	_build_sky()
 
+	if rider == "":
+		rider = chosen_rider
 	glider = Glider.new()
+	glider.rider = rider
 	input = FlightInput.new()
 	input.use_pads = use_pads
 	add_child(input)
@@ -73,8 +88,8 @@ func _ready() -> void:
 	if level == "coast":
 		# Real ground below: no sea of clouds, and the cloud bases lifted clear of the hills.
 		clouds.sea_enabled = false
-		clouds.altitude_shift = 420.0
-		clouds.wind = Vector3(1.5, 0.0, -5.0)
+		clouds.altitude_shift = 760.0
+		clouds.wind = Vector3(5.0, 0.0, 0.7)
 	add_child(clouds)
 	glider.air.append(clouds)
 
@@ -90,11 +105,21 @@ func _ready() -> void:
 		glider.air.append(coast)
 		glider.solids.append(coast)
 		start = coast.start_position()
-	elif use_fleet:
+		start_heading = coast.start_heading()
+		# The convoy sails north along the cliffs, out over the water, and will cross the mouth of
+		# the valley a few minutes after she comes in from the sea.
+		_fleet_from = Vector3(1700, 330, 3300)
+		_fleet_heading = 0.0
+	if use_fleet:
 		fleet = Fleet.new()
 		fleet.focus = glider
+		if level == "coast":
+			# When it comes round again, keep it above the island and its pinnacles.
+			fleet.floor_y = 1300.0
+			fleet.ceiling_y = 1500.0
 		add_child(fleet)
 		glider.solids.append(fleet)
+		glider.downed.connect(restart, CONNECT_DEFERRED)
 
 	cam = ChaseCam.new()
 	cam.target = glider
@@ -106,14 +131,18 @@ func _ready() -> void:
 		hud.glider = glider
 		hud.input = input
 		hud.level_name = LEVEL_NAMES[level]
+		hud.rider_name = RIDER_NAMES[rider]
 		add_child(hud)
 		hud.level_pressed.connect(next_level)
+		hud.rider_pressed.connect(next_rider)
+		glider.hurt.connect(hud.flash)
 
 	restart()
 	clouds.prewarm()
 	input.reset_pressed.connect(restart)
 	input.weather_pressed.connect(clouds.set_weather)
 	input.level_pressed.connect(next_level)
+	input.rider_pressed.connect(next_rider)
 
 
 func _build_sky() -> void:
@@ -152,16 +181,25 @@ func _build_sky() -> void:
 
 
 func restart() -> void:
-	glider.reset(start)
+	glider.reset(start, start_heading)
 	if fleet:
-		# The convoy starts ahead and a little to one side, sailing nearly the same way.
-		fleet.place(start + Vector3(260, -70, -1150), 0.22)
+		fleet.place(start + _fleet_from, _fleet_heading)
+	if coast:
+		coast.prewarm()
 	cam.snap()
 
 
 ## Reload the scene as the next level in LEVELS.
 func next_level() -> void:
 	chosen = LEVELS[(LEVELS.find(level) + 1) % LEVELS.size()]
+	chosen_rider = rider
+	get_tree().reload_current_scene()
+
+
+## Reload the scene with the other rider.
+func next_rider() -> void:
+	chosen = level
+	chosen_rider = "glider" if rider == "witch" else "witch"
 	get_tree().reload_current_scene()
 
 

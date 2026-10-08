@@ -2,14 +2,16 @@ shader_type spatial;
 render_mode unshaded, cull_back, fog_disabled;
 
 // The ocean: one huge flat sheet that follows the glider. Deep blue out at sea, turquoise over
-// the shallows and white with foam where it meets the land (it reads the island's height map to
-// know how deep the water is). Small waves tilt the surface so it picks up the sky and the sun's
-// glitter. It fades into the same haze as the sky at the horizon.
+// the shallows, white with foam along the foot of the cliffs, and rolling in in lines of surf on
+// the beach. Small waves tilt the surface so it picks up the sky and the sun's glitter. It fades
+// into the same haze as the sky at the horizon.
+//
+// shore_x(), the valley and the sea bed's slope repeat what scripts/coast.gd does, so the water
+// knows where the land is without being told. Keep the two in step.
 
 uniform sampler2D noise_tex : repeat_enable, filter_linear_mipmap;
-uniform sampler2D height_tex : repeat_disable, filter_linear;
-// The patch of world the height map covers: x, z of its corner, then its width and depth.
-uniform vec4 land_rect = vec4(-1.0, -1.0, 2.0, 2.0);
+uniform float valley_z = 0.0;
+uniform float valley_half = 640.0;
 uniform vec3 sun_dir = vec3(0.0, 1.0, 0.0);
 uniform vec3 deep_color : source_color = vec3(0.05, 0.22, 0.45);
 uniform vec3 shallow_color : source_color = vec3(0.2, 0.62, 0.66);
@@ -19,6 +21,10 @@ uniform vec3 sun_color : source_color = vec3(1.0, 0.95, 0.82);
 uniform float haze_distance = 8500.0;
 
 varying vec3 w_pos;
+
+float shore_x(float z) {
+	return 260.0 * sin(z / 1900.0 + 1.3) + 140.0 * sin(z / 830.0 + 4.1) + 60.0 * sin(z / 310.0 + 0.7);
+}
 
 float swell(vec2 p) {
 	return texture(noise_tex, p / 310.0 + vec2(TIME * 0.011, TIME * 0.006)).r * 0.6
@@ -42,13 +48,13 @@ void fragment() {
 	float hz = swell(p + vec2(0.0, 6.0));
 	vec3 n = normalize(vec3((h - hx) * 5.0 * calm, 1.0, (h - hz) * 5.0 * calm));
 
-	// How deep is the water here?
-	vec2 uv = (p - land_rect.xy) / land_rect.zw;
-	float ground = -120.0;
-	if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
-		ground = texture(height_tex, uv).r;
-	}
-	float depth = -ground;
+	// How far off shore is this, and how deep? The sea bed drops fast under the cliffs and
+	// shelves gently off the beach at the valley's mouth.
+	float off = shore_x(p.y) - p.x;
+	float beach = 1.0 - smoothstep(0.3, 1.0, abs(p.y - (valley_z + 260.0 * sin(p.x / 1700.0 + 0.5))) / valley_half);
+	// (Only close in: further out the bed falls away like anywhere else.)
+	beach *= 1.0 - smoothstep(250.0, 1000.0, off);
+	float depth = min(off * mix(0.9, 0.035, beach), 120.0);
 	vec3 col = mix(shallow_color, deep_color, smoothstep(0.0, 70.0, depth));
 	col *= mix(0.9, 1.08, h);
 
@@ -59,8 +65,11 @@ void fragment() {
 	col += sun_color * glitter * 1.6;
 
 	// Foam: a ragged white line at the shore that breathes in and out, and a few whitecaps.
-	float wash = 9.0 + 5.0 * sin(TIME * 0.7 + h * 12.0);
-	float foam = (1.0 - smoothstep(wash * 0.5, wash, depth)) * smoothstep(0.35, 0.6, h + 0.25);
+	float wash = 10.0 + 5.0 * sin(TIME * 0.7 + h * 12.0);
+	float foam = (1.0 - smoothstep(wash * 0.5, wash, off)) * smoothstep(0.35, 0.6, h + 0.25);
+	// Surf: lines of breakers rolling up the beach.
+	float roller = smoothstep(0.8, 0.96, sin(off * 0.085 + TIME * 0.9 + h * 2.5));
+	foam = max(foam, roller * beach * (1.0 - smoothstep(70.0, 190.0, off)) * smoothstep(0.3, 0.55, h + 0.2));
 	foam = max(foam, smoothstep(0.76, 0.8, h) * 0.3 * calm);
 	col = mix(col, vec3(0.97), foam);
 

@@ -1,5 +1,6 @@
 extends SceneTree
-## Checks the coast level: the land is there and is solid, the cliffs make lift, things were placed.
+## Checks the coast level: the cliffs, the valley and its castle, that the land goes on north and
+## south, that it is solid, and that the cliffs make lift.
 ## Run: godot --headless --fixed-fps 60 --path . -s res://tests/coast_test.gd
 
 const Main := preload("res://scenes/main.tscn")
@@ -31,34 +32,52 @@ func _run() -> void:
 	var coast: Node3D = main.coast
 	var glider: Node3D = main.glider
 	main.input.manual = true
+	_check("airships sail off the coast", main.fleet != null and main.fleet.ships.size() == 5, "%d ships" % main.fleet.ships.size())
+	main.fleet.armed = false
 	glider.bumped.connect(func() -> void: bumps += 1)
 
-	_check("there is land in the middle and sea far out", coast.height_at(0, 0) > 150.0 and coast.height_at(9000, 0) < 0.0,
-			"middle %.0f m, far out %.0f m" % [coast.height_at(0, 0), coast.height_at(9000, 0)])
-	_check("the island is furnished", coast.windmills >= 12 and coast.houses >= 80 and coast.spires >= 20,
-			"%d windmills, %d houses, %d spires" % [coast.windmills, coast.houses, coast.spires])
-
-	# Walk in from the south until the cliff: the ground should jump up steeply there.
-	var edge: float = 0.0
-	for z in range(4200, 0, -10):
-		if coast.height_at(0, z) > 60.0:
-			edge = float(z)
-			break
-	var foot: float = coast.height_at(0, edge + 120.0)
-	_check("the south coast is a cliff", edge > 0.0 and foot <= 0.0, "cliff top at z=%.0f, %.0f m at 120 m out" % [edge, foot])
-	var lift: float = coast.wind_at(Vector3(0, 220, edge + 20.0)).y
+	# Away from the valley: sea to the west, and the cliffs straight out of it to the east.
+	var z: float = 3000.0
+	var shore: float = coast.shore_x(z)
+	_check("sea to the west, land to the east", coast.height_at(shore - 3000.0, z) < 0.0 and coast.height_at(shore + 3000.0, z) > 300.0,
+			"%.0f m out at sea, %.0f m inland" % [coast.height_at(shore - 3000.0, z), coast.height_at(shore + 3000.0, z)])
+	_check("the cliffs tower", coast.height_at(shore + 900.0, z) > 480.0 and coast.height_at(shore + 60.0, z) > 80.0,
+			"%.0f m at the top, %.0f m just 60 m in from the water" % [coast.height_at(shore + 900.0, z), coast.height_at(shore + 60.0, z)])
+	var lift: float = coast.wind_at(Vector3(shore + 40.0, 260.0, z)).y
 	_check("the sea wind rises up the cliff", lift > 2.5, "%.1f m/s" % lift)
+
+	# The valley: a beach at the water, a gentle climb, and the castle standing in it.
+	var vs: float = coast.shore_x(coast.VALLEY_Z)
+	var beach: float = coast.height_at(vs + 120.0, coast.valley_mid(vs + 120.0))
+	var floor_600: float = coast.height_at(vs + 600.0, coast.valley_mid(vs + 600.0))
+	_check("the valley runs gently down to a beach", beach > 0.0 and beach < 9.0 and floor_600 < 60.0,
+			"%.1f m at the beach, %.0f m at 600 m in (the cliffs are %.0f m there)" % [beach, floor_600, coast.height_at(shore + 600.0, z)])
+	_check("the castle stands in the valley", coast.valley(coast.castle.x, coast.castle.z) > 0.9 and coast.hit(coast.castle + Vector3(20, 120, 0), 2.0) != Vector3.ZERO,
+			"at %s" % coast.castle)
+
+	var here: Dictionary = coast.stats()
+	_check("the ledges are lived on", here["windmills"] >= 6 and here["ledge_houses"] >= 60 and here["spires"] >= 4, str(here))
 	var start: Vector3 = coast.start_position()
 	_check("she starts in clear air over the sea", coast.hit(start, 3.0) == Vector3.ZERO and coast.height_at(start.x, start.z) < 0.0, str(start))
 
-	# Fly level straight at the cliff face, and dive at the sea. She must stay out of both.
+	# Fly level straight at the cliff face. She must stay out of it, and out of the sea after.
 	glider.air = []
-	glider.reset(Vector3(0, 70, edge + 300.0))
+	glider.reset(Vector3(shore - 300.0, 70.0, z), -PI * 0.5)
 	var deepest: float = 0.0
 	for i in 1500:
 		await physics_frame
 		deepest = maxf(deepest, maxf(coast.height_at(glider.position.x, glider.position.z), 0.0) - glider.position.y)
 	_check("she cannot fly through the cliff or the sea", bumps > 0 and deepest < 1.0, "%d bumps, deepest %.2f m under" % [bumps, deepest])
+
+	# A long way north the coast is still there, built around her as she arrives.
+	glider.set_physics_process(false)
+	var far_z: float = -60000.0
+	glider.position = Vector3(coast.shore_x(far_z) + 200.0, 900.0, far_z)
+	for i in 240:
+		await process_frame
+	var there: Dictionary = coast.stats()
+	_check("the coast goes on for ever", coast.height_at(coast.shore_x(far_z) + 900.0, far_z) > 480.0 and there["chunks"] > 100 and there["ledge_houses"] > 20,
+			"60 km north: %s" % str(there))
 
 	print("coast_test: %d passed, %d failed" % [passed, failed])
 	quit(1 if failed > 0 else 0)

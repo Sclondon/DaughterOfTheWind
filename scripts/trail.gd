@@ -11,6 +11,8 @@ const WIDTH := 0.07
 var source: Node3D
 var offset := Vector3.ZERO
 var strength := 0.0
+var tint := Color.WHITE
+var width := WIDTH
 
 var _points: Array = []  # each [Vector3 position, float born, float strength]
 var _mesh := ImmediateMesh.new()
@@ -76,10 +78,10 @@ func _process(_delta: float) -> void:
 		var side: Vector3 = along.cross(eye - p)
 		if side.length() < 0.0001:
 			side = Vector3.UP
-		side = side.normalized() * WIDTH * (0.6 + s) * (1.0 + age * 1.5)
+		side = side.normalized() * width * (0.6 + s) * (1.0 + age * 1.5)
 		# Vapour right in front of the lens would fill the screen, so it thins out near the camera.
 		var close: float = smoothstep(3.0, 8.0, eye.distance_to(p))
-		var color := Color(1, 1, 1, s * (1.0 - age) * (1.0 - age) * 0.75 * close)
+		var color := Color(tint.r, tint.g, tint.b, s * (1.0 - age) * (1.0 - age) * 0.75 * close)
 		_mesh.surface_set_color(color)
 		_mesh.surface_add_vertex(p + side)
 		_mesh.surface_set_color(color)

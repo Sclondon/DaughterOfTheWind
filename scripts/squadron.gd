@@ -228,11 +228,11 @@ func _keep_clear(at: Vector3, want: Vector3) -> Vector3:
 ## The H-shaped fighter: two booms, the wing joining them, tail fins, engines, and the pod with
 ## its glass canopy and the pilot's helmet inside. Forward is -Z.
 func _build(side: int) -> Node3D:
-	var hull: ShaderMaterial = Toon.paint(LIVERY[side][0], 9.0)
-	var trim: ShaderMaterial = Toon.paint(LIVERY[side][1], 9.0)
-	var dark: ShaderMaterial = Toon.paint(Color(0.12, 0.12, 0.14), 3.0)
-	var glass: ShaderMaterial = Toon.glowing(Color(0.55, 0.8, 0.9), Color(0.12, 0.2, 0.24), 3.0)
-	var burn: ShaderMaterial = Toon.glowing(Color(1.0, 0.6, 0.2), Color(2.0, 1.0, 0.3), 3.0)
+	var hull: ShaderMaterial = Toon.paint(LIVERY[side][0])
+	var trim: ShaderMaterial = Toon.paint(LIVERY[side][1])
+	var dark: ShaderMaterial = Toon.paint(Color(0.12, 0.12, 0.14))
+	var glass: ShaderMaterial = Toon.glowing(Color(0.55, 0.8, 0.9), Color(0.12, 0.2, 0.24))
+	var burn: ShaderMaterial = Toon.glowing(Color(1.0, 0.6, 0.2), Color(2.0, 1.0, 0.3))
 	var node := Node3D.new()
 
 	var boom_shape := func(t: float) -> Vector3:

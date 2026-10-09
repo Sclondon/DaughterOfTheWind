@@ -208,7 +208,7 @@ func _ready() -> void:
 
 
 func _paint(color: Color, _roughness: float) -> ShaderMaterial:
-	return Toon.paint(color, 4.0)
+	return Toon.paint(color)
 
 
 func _process(delta: float) -> void:

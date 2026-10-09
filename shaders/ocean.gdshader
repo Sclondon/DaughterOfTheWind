@@ -10,7 +10,6 @@ render_mode unshaded, cull_back, fog_disabled;
 // knows where the land is without being told. Keep the two in step.
 
 uniform sampler2D noise_tex : repeat_enable, filter_linear_mipmap;
-global uniform sampler2D watercolor : repeat_enable, filter_linear_mipmap;
 uniform float valley_z = 0.0;
 uniform float valley_half = 640.0;
 uniform vec3 sun_dir = vec3(0.0, 1.0, 0.0);
@@ -57,11 +56,8 @@ void fragment() {
 	beach *= 1.0 - smoothstep(250.0, 1000.0, off);
 	float depth = min(off * mix(0.9, 0.035, beach), 120.0);
 	vec3 col = mix(shallow_color, deep_color, smoothstep(0.0, 70.0, depth));
-	// Cel shading: the swell in two flat tones, under a wide watercolour wash.
-	col *= mix(0.88, 1.06, smoothstep(0.47, 0.5, h));
-	vec3 paper = texture(watercolor, p / 2300.0).rgb;
-	col *= mix(0.84, 1.12, paper.r);
-	col = mix(col, shallow_color, paper.g * 0.1);
+	// Cel shading: the swell in two flat tones.
+	col *= mix(0.9, 1.06, smoothstep(0.47, 0.5, h));
 
 	// The surface mirrors the sky more at a glancing angle.
 	float glance = pow(1.0 - max(dot(n, v), 0.0), 4.0);

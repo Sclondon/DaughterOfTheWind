@@ -113,20 +113,21 @@ func _ready() -> void:
 	_crown.height = 2.0
 	_crown.radial_segments = 14
 	_crown.rings = 9
-	_leaf_mat = Toon.tinted(110.0)
+	_leaf_mat = Toon.tinted()
 
 	_ground_mat = ShaderMaterial.new()
 	_ground_mat.shader = TerrainShader
 	_ground_mat.set_shader_parameter("noise_tex", noise_tex)
 	_ground_mat.set_shader_parameter("valley_z", VALLEY_Z)
+	_ground_mat.set_shader_parameter("rim", 0.0)
 	_rock_mat = _ground_mat.duplicate() as ShaderMaterial
 	_rock_mat.set_shader_parameter("use_farms", false)
-	_house_mat = Toon.tinted(60.0)
+	_house_mat = Toon.tinted()
 	for paint: Array in [["cream", Color(0.9, 0.86, 0.76), 0.9], ["cap", Color(0.55, 0.25, 0.18), 0.7],
 			["sail", Color(0.95, 0.93, 0.86), 0.8], ["timber", Color(0.35, 0.25, 0.18), 0.9],
 			["stone", Color(0.76, 0.72, 0.64), 0.9], ["slate", Color(0.24, 0.33, 0.45), 0.6],
 			["bark", Color(0.42, 0.31, 0.22), 0.9]]:
-		_paints[paint[0]] = Toon.paint(paint[1], 45.0, true)
+		_paints[paint[0]] = Toon.paint(paint[1])
 
 	var cx: float = shore_x(VALLEY_Z) + CASTLE_INLAND
 	# Beside the stream, not in it.

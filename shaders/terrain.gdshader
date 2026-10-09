@@ -93,9 +93,7 @@ void fragment() {
 	// Wet and dark where the sea washes the foot of the cliffs.
 	col = mix(col * 0.55, col, smoothstep(-2.0, 7.0, w_pos.y));
 
-	// Two washes: a wide one over the whole country, and a closer one.
-	col = wash(col, w_pos, w_normal, 520.0);
-	ALBEDO = mix(col, wash(col, w_pos, w_normal, 90.0), near * 0.6);
+	ALBEDO = col;
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.0;
 }

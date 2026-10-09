@@ -10,7 +10,8 @@ extends Node3D
 ## Both have the battle (battle.gd): two fleets of airships fighting each other, with their
 ## fighters, and all of them firing on the glider. Shot down, she starts again.
 ## This script also fades the view to white when the camera is inside a cloud, and handles
-## restart (R), the weather keys (1 / 2 / 3), switching level (L, or the button on the HUD) and
+## restart (R), the weather keys (1 / 2 / 3), switching level (L, or the button on the HUD; after
+## the two levels comes the diorama, a test room with an orbiting camera) and
 ## switching rider between the glider and the witch on her broom (G, or its button).
 ##
 ## Tests set the exported switches below before adding the scene to the tree.
@@ -25,8 +26,9 @@ const Coast := preload("res://scripts/coast.gd")
 const Hud := preload("res://scripts/hud.gd")
 const SkyShader := preload("res://shaders/sky.gdshader")
 
-const LEVELS := ["clouds", "coast"]
-const LEVEL_NAMES := {"clouds": "Sea of Clouds", "coast": "The Windward Coast"}
+## "diorama" is not built here: it is its own scene (scripts/diorama.gd), a test room for the look.
+const LEVELS := ["clouds", "coast", "diorama"]
+const LEVEL_NAMES := {"clouds": "Sea of Clouds", "coast": "The Windward Coast", "diorama": "Diorama"}
 const RIDER_NAMES := {"glider": "Glider", "witch": "Witch"}
 const ZENITH := Color(0.09, 0.29, 0.7)
 const HAZE := Color(0.73, 0.85, 0.96)
@@ -73,6 +75,8 @@ var _battle_angle := 0.0
 func _ready() -> void:
 	if level == "":
 		level = chosen
+	if level == "diorama":
+		level = LEVELS[0]
 	_build_sky()
 
 	if rider == "":
@@ -206,7 +210,10 @@ func restart() -> void:
 func next_level() -> void:
 	chosen = LEVELS[(LEVELS.find(level) + 1) % LEVELS.size()]
 	chosen_rider = rider
-	get_tree().reload_current_scene()
+	if chosen == "diorama":
+		get_tree().change_scene_to_file("res://scenes/diorama.tscn")
+	else:
+		get_tree().reload_current_scene()
 
 
 ## Reload the scene with the other rider.

@@ -19,6 +19,8 @@ var boost := false
 var brake := false
 var manual := false
 var use_pads := true
+## False leaves touches and mouse drags alone (the diorama uses them to turn its camera).
+var touch_enabled := true
 
 ## Where the touch stick is on screen, for the HUD to draw. `stick_touch` is -1 when no finger is down.
 var stick_touch := -1
@@ -29,7 +31,7 @@ var _boost_touch := -1
 
 # Unhandled, so a tap on a HUD button does not also steer or boost.
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventScreenTouch:
+	if event is InputEventScreenTouch and touch_enabled:
 		if event.pressed:
 			var width: float = get_viewport().get_visible_rect().size.x
 			if event.position.x < width * 0.6:
@@ -44,7 +46,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				stick_touch = -1
 			if event.index == _boost_touch:
 				_boost_touch = -1
-	elif event is InputEventScreenDrag:
+	elif event is InputEventScreenDrag and touch_enabled:
 		if event.index == stick_touch:
 			stick_now = event.position
 	elif event is InputEventKey and event.pressed and not event.echo:

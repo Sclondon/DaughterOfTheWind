@@ -71,8 +71,8 @@ func build(ship_length: float, ship_seed: int, faction: int = 0) -> void:
 	hull_metal.set_shader_parameter("hull_length", length)
 	hull_metal.set_shader_parameter("half_height", _half_h)
 	hull_metal.set_shader_parameter("stripe_color", LIVERY[faction][1])
-	_dark = Toon.paint(Color(0.14, 0.14, 0.16), 14.0)
-	_glass = Toon.glowing(Color(0.1, 0.1, 0.1), Color(1.6, 1.25, 0.7), 14.0)
+	_dark = Toon.paint(Color(0.14, 0.14, 0.16))
+	_glass = Toon.glowing(Color(0.1, 0.1, 0.1), Color(1.6, 1.25, 0.7))
 
 	var hull := MeshInstance3D.new()
 	hull.mesh = MeshKit.body(length, _hull_shape, 32, 36, 3.2, 0.85)

@@ -12,7 +12,8 @@ The whole world is built in code. `scenes/main.tscn` is just `scripts/main.gd`.
 - `glider.gd`: the flight model (Node3D, forward is -Z, integrated in `_physics_process`). Lift and drag from airspeed and angle of attack; the stick asks for a bank angle and an angle of attack. All tuning is the constants at the top.
   - Its air is the sum of `wind_at()` over the nodes in `air`; the nodes in `solids` push it out through `hit()` (signal `bumped`). `control` is the smoothed stick.
   - Upside down with the stick held (`looping`), the roll control keeps the wings level instead of rolling upright, so loops go round.
-- `glider_model.gd`: the flat white panel-wing glider (after the user's reference still), the pilot, the jet flame. Flaps and round tips are separate nodes that move with `control` and `load_factor`. Each wingtip `trail.gd` ribbon gets its strength from the lift that tip is making (its own speed and angle).
+- `glider_model.gd`: the cream eggshell panel-wing glider (after the user's reference still): a cut-off teardrop tube for a body, low hoops, fins on the tip seams, a few electronics housings. Only the flaps move. It poses the pilot each frame (stand / crouch / hang on, from `glider.climb` and the stick). Each wingtip `trail.gd` ribbon gets its strength from the lift that tip is making.
+- `girl.gd` + `models/girl.glb`: the pilot, a single skinned mesh built by `art/build_girl.py` (Blender 4.3: `blender -b --factory-startup --python art/build_girl.py`, then `godot --headless --import`). No animation clips: `pose()` places the hips and solves each arm and leg with two-bone IK to hand and foot targets, in the glider's space. Materials are repainted by their Blender names (`COLOURS`). `art/` has a `.gdignore`; the `.blend` is there to edit by hand.
 - `witch_model.gd`: the other rider, a witch on a broomstick (`glider.rider = "witch"`). Same flight, different model; one spark trail from the broom's tail.
 - `flight_input.gd`: keys, gamepad and touch into `stick` / `boost` / `brake`. `stick.y` positive pulls the nose up. Tests set `manual = true` and write the values.
 - `chase_cam.gd`: follows the glider's interpolated transform in `_process`; keeps the horizon mostly flat when level and goes over with the glider in a loop.
@@ -23,9 +24,10 @@ The whole world is built in code. `scenes/main.tscn` is just `scripts/main.gd`.
   - `set_weather(0..2)`, `prewarm()`, `stats()`, `all_clouds()`.
   - The node itself drifts on the wind; cloud positions are in its space, so subtract `drift` from world points.
 - `airship.gd`: one ship built from a length and a seed (`build()`), cruising straight; `hit()` is its collision. Turrets (`_work_guns`) fire at the glider when she is in range, otherwise at the nearest of `foes`, through `flak.gd`, which owns the shells and the Wind Waker-style puff explosions (`shaders/burst`). A hit calls `glider.take_hit()` (5 health, mends; `downed` restarts).
+- `diorama.gd` (`scenes/diorama.tscn`): a separate small scene for judging the look: the rider held still in a wind, plain test shapes, a few drifting clouds, a full orbit camera (drag, wheel, pinch) and a movable sun. It is the third entry in `main.LEVELS`; `next_level()` changes scene to it and its Back button returns. Run it directly with `godot --path . res://scenes/diorama.tscn`.
 - `battle.gd`: the war. Two `fleet.gd` (one per side, sailing the same circle a broadside apart), one shared `flak.gd`, and `squadron.gd` (the H-shaped fighters: steered, not flown with the flight model; they chase the glider or each other and are shot down and relaunched). `battle.armed = false` holds all fire; `battle.place()` moves the whole thing. `main.fleet` is `battle.fleets[0]`.
-- `toon.gd` + `shaders/toon.gdshader` + `shaders/toon.gdshaderinc`: the look. Every solid material is cel shaded (custom `light()`, no outlines) and washed with `art/watercolor.png`, which is a **global shader uniform** (`[shader_globals]` in project.godot; regenerate with `tools/make_watercolor.gd`). Use `Toon.paint()` / `tinted()` / `glowing()`, never StandardMaterial3D, for anything lit. Unshaded shaders (clouds, ocean) sample `watercolor` themselves.
-- `hair.gd`: the rider's long hair, a small verlet cloth in world space pinned to the head.
+- `toon.gd` + `shaders/toon.gdshader` + `shaders/toon.gdshaderinc`: the look. Every solid material is cel shaded after Breath of the Wild (custom `light()`: two flat tones, a rim on the lit side, an optional hard highlight; no outlines, **no textures**: the user had a watercolour wash removed on 2026-10-08 as "splotchy"). Use `Toon.paint()` / `tinted()` / `glowing()` / `eggshell()` / `shiny()`, never StandardMaterial3D, for anything lit.
+- `hair.gd`: a small verlet cloth in world space pinned to an anchor node. The girl has two (short hair on her head, a scarf at her neck); the witch has long hair.
 - `sun_glare.gd` + `shaders/sun_glare`: the lens glare, a full-screen additive canvas shader under the HUD.
 - `mesh_kit.gd`: `loft`, `wing`, `slab`, `body`, `rod`. UVs are in metres.
 - `shaders/`: `cloud_puff` (MultiMesh puffs; per-puff data in INSTANCE_CUSTOM and COLOR), `cloud_sea`, `sky`, `hull` (plates, rivets, belly paint, portholes), `terrain` (grass, fields from vertex colour red, cliff rock by slope), `ocean`.
@@ -44,6 +46,7 @@ Run from this folder with `--headless --fixed-fps 60 --path . -s res://tests/<na
 | `cloud_test` | 10 PASS |
 | `fleet_test` | 12 PASS |
 | `coast_test` | 13 PASS |
+| `diorama_test` | 5 PASS |
 | `hair_test` | 3 PASS (run without `--fixed-fps`) |
 
 `tests/shots.gd` needs a window (no `--headless`) and takes `-- <out dir>`; it saves 13 views (glider close-ups, a turn, the fleet, the cloud sea), or with `-- <out dir> coast [witch]` the coast views (cliffs, valley, castle, flak, explosions). Run tests under `timeout`: a script error at startup hangs the run.

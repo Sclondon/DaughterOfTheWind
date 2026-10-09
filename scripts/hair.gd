@@ -25,6 +25,11 @@ var link := 0.16
 var width := 0.2
 var end_width := 0.34
 var color := Color(0.55, 0.27, 0.14)
+## The air's own velocity. Zero in flight (the rider moves through still air); the diorama sets
+## it to blow past a rider who is standing still.
+var wind := Vector3.ZERO
+## Which way is "across the hair" at the pinned end, in the anchor's own space.
+var across := Vector3.RIGHT
 
 var _now: Array = []  # per strand: PackedVector3Array of points
 var _before: Array = []
@@ -34,18 +39,19 @@ var _last_pin: Transform3D
 
 
 func _ready() -> void:
+	add_to_group("hair")
 	top_level = true
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	global_transform = Transform3D.IDENTITY
 	mesh = _mesh
-	material_override = Toon.paint(color, 5.0, true)
+	material_override = Toon.paint(color)
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	custom_aabb = AABB(Vector3.ONE * -100000.0, Vector3.ONE * 200000.0)
 
 
 ## Where strand s is pinned, in world space.
 func _pin(t: Transform3D, s: int) -> Vector3:
-	return t * (root + Vector3((float(s) / float(STRANDS - 1) - 0.5) * width, 0.0, 0.0))
+	return t * (root + across * (float(s) / float(STRANDS - 1) - 0.5) * width)
 
 
 func _lay_out(t: Transform3D) -> void:
@@ -87,10 +93,11 @@ func _step(t: Transform3D, dt: float) -> void:
 		last[0] = strand[0]
 		for i in range(1, LINKS + 1):
 			var velocity: Vector3 = (strand[i] - last[i]) / dt
-			# Still air drags against however fast the hair is being carried through it.
-			var push: Vector3 = Vector3.DOWN * WEIGHT - velocity * DRAG
+			# The air drags against however fast the hair is moving through it.
+			var through: Vector3 = velocity - wind
+			var push: Vector3 = Vector3.DOWN * WEIGHT - through * DRAG
 			# The wind shakes it: waves that run down the hair, bigger toward the end and with speed.
-			var shake: float = velocity.length() * 0.55 * float(i) / float(LINKS)
+			var shake: float = through.length() * 0.55 * float(i) / float(LINKS)
 			push += t.basis.x * sin(_time * 15.0 - i * 0.8 + s * 0.5) * shake
 			push += t.basis.y * sin(_time * 11.0 - i * 1.1 + s * 0.9) * shake * 0.7
 			last[i] = strand[i]

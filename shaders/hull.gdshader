@@ -84,7 +84,7 @@ void fragment() {
 	col *= mix(1.0, mix(0.62, 1.0, seam), mid);
 	col = mix(col, col * 1.5 + 0.03, rivet * near * 0.6);
 
-	ALBEDO = wash(col, l_pos, normalize(l_normal), 55.0);
+	ALBEDO = col;
 	EMISSION = window_glow * glow * 1.4;
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.0;

@@ -1,16 +1,18 @@
 extends Node3D
 ## What the glider looks like, and the girl who flies it.
 ##
-## The glider: a flat wing made of panels with short round tips that hook back, in a matte cream
-## eggshell finish. Its body is a squashed teardrop with both ends cut off, so it is an open tube
-## with the jet inside. A thin fin stands on the seam under each wingtip, two low hoops with a
-## strap between them are there to hold on to, and a few small electronics housings sit on top.
+## The glider: a wing made of flat panels, angled up very slightly from the body, with round
+## tips that hook back and droop a little from where they join on, in a matte cream eggshell
+## finish. Its body is a squashed teardrop with both ends cut off, so it is an open tube with the
+## jet inside. Under each tip joint hangs a long pointed pod that sticks out past the trailing
+## edge, two hooked skids under the body are its landing gear, two low hoops with a strap
+## between them are there to hold on to, and a few small electronics housings are let into it.
 ## The only parts that move are the rear flaps: together for pitch, opposite for roll.
 ##
 ## The girl (girl.gd) stands on the body holding the hoops. Flying level she stands, bent
 ## forward over her hands; in a climb she crouches down; when the glider drops away under her
-## she hangs on with her legs trailing. Her short hair and her scarf are both small cloths that
-## flap in the wind (hair.gd).
+## she hangs on with her legs trailing. She brings her own hair, scarf and skirt, which all
+## blow in the wind (girl.gd).
 ##
 ## It also owns the jet flame and the two wingtip vapour trails. Each trail is as strong as the
 ## lift its own tip is making, so the tip on the outside of a turn or on the down-going side of a
@@ -19,13 +21,16 @@ extends Node3D
 const MeshKit := preload("res://scripts/mesh_kit.gd")
 const Trail := preload("res://scripts/trail.gd")
 const Toon := preload("res://scripts/toon.gd")
-const Hair := preload("res://scripts/hair.gd")
 const Girl := preload("res://scripts/girl.gd")
 
 ## Where the body ends and the wing panels begin, where the round tips join on, and how long they are.
 const ROOT := 0.3
-const TIP_HINGE := 1.98
-const TIP_LENGTH := 0.66
+const TIP_HINGE := 2.3
+const TIP_LENGTH := 0.86
+## How far each wing is angled up from level, and how far each tip is angled back down from
+## its wing at the joint (radians).
+const DIHEDRAL := 0.07
+const DROOP := 0.17
 ## How far the very end of the tip is swept back.
 const HOOK := 0.36
 ## Leading and trailing edge of the wing (forward is -Z), and where the flap hinges.
@@ -35,14 +40,15 @@ const FLAP_HINGE := 0.06
 const THICK := 0.12
 ## The top of the body, where she stands, and the top of the hoops, where she holds on.
 const DECK := 0.19
-const GRIP := Vector3(0.2, 0.55, -0.42)
-const CREAM := Color(0.9, 0.84, 0.7)
+const GRIP := Vector3(0.2, 0.37, -0.42)
+const CREAM := Color(0.87, 0.78, 0.59)
 
 var glider: Node3D
 var girl: Node3D
 
 var _flame: MeshInstance3D
 var _halves: Array = []  # per side: [flap, tip, trail, side sign]
+var _wings: Array = []  # the two wing halves (left, right), each tilted up by DIHEDRAL
 var _tip_last: Array = [Vector3.ZERO, Vector3.ZERO]
 var _tip_strength: Array = [0.0, 0.0]
 var _flame_size := 0.0
@@ -60,6 +66,7 @@ func _ready() -> void:
 	for side: float in [-1.0, 1.0]:
 		_build_half(side, shell)
 	_build_body(shell, dark)
+	_build_skids(shell)
 
 	var flame_mat := StandardMaterial3D.new()
 	flame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -99,11 +106,16 @@ func _ready() -> void:
 ## One half of the wing: the fixed front panel, the flap fitted close behind it, the round tip,
 ## and the fin on the seam where the tip joins on.
 func _build_half(side: float, shell: Material) -> void:
+	# Everything on this side hangs off one node, tilted up from the body.
+	var half := Node3D.new()
+	half.rotation.z = DIHEDRAL * side
+	add_child(half)
+	_wings.append(half)
 	var front := MeshInstance3D.new()
 	front.mesh = MeshKit.slab(_stations(ROOT * 0.6, TIP_HINGE - 0.005, side, 6),
 			func(_x: float) -> Vector2: return Vector2(LEAD, FLAP_HINGE - 0.006), THICK)
 	front.material_override = shell
-	add_child(front)
+	half.add_child(front)
 
 	# The flap runs the whole length of the panel and sits tight against it.
 	var flap := MeshInstance3D.new()
@@ -111,12 +123,13 @@ func _build_half(side: float, shell: Material) -> void:
 			func(_x: float) -> Vector2: return Vector2(0.0, TRAIL_EDGE - FLAP_HINGE - 0.006), THICK * 0.94)
 	flap.material_override = shell
 	flap.position = Vector3(0, 0, FLAP_HINGE + 0.006)
-	add_child(flap)
+	half.add_child(flap)
 
-	# The tip: half an ellipse in outline with its end hooked back. It is fixed.
+	# The tip: half an ellipse in outline with its end hooked back, angled down from the joint.
 	var tip := Node3D.new()
 	tip.position = Vector3(TIP_HINGE * side, 0, 0)
-	add_child(tip)
+	tip.rotation.z = -DROOP * side
+	half.add_child(tip)
 	var xs := PackedFloat32Array()
 	for i in 13:
 		xs.append(TIP_LENGTH * sin(float(i) / 12.0 * PI * 0.5) * side)
@@ -134,25 +147,19 @@ func _build_half(side: float, shell: Material) -> void:
 	tip_mesh.material_override = shell
 	tip.add_child(tip_mesh)
 
-	# The fin: a thin blade standing in the plane of the seam itself, rooted in the front of the
-	# wing there and raked forward and down past the leading edge.
-	var blade_long: float = 0.46
-	var fin := MeshInstance3D.new()
-	fin.mesh = MeshKit.slab(PackedFloat32Array([0.0, 0.08, 0.17, 0.27, 0.37, blade_long]),
-			func(x: float) -> Vector2:
-				var half: float = 0.11 * (1.0 - pow(x / blade_long, 1.6)) + 0.01
-				return Vector2(-half, half), 0.04, 4)
-	fin.material_override = shell
-	# The slab runs along its own X: lay that along the rake, with its thin side across the span.
-	var rake := Vector3(0, -0.45, -0.89).normalized()
-	fin.transform = Transform3D(Basis(rake, Vector3.RIGHT, rake.cross(Vector3.RIGHT)),
-			Vector3(TIP_HINGE * side, -0.02, LEAD + 0.14))
-	add_child(fin)
+	# Under the joint: a long pointed oval pod, running fore and aft, hanging off the back of the wing.
+	var pod := MeshInstance3D.new()
+	pod.mesh = MeshKit.body(1.6, func(t: float) -> Vector3:
+		var r: float = maxf(pow(sin(PI * t), 0.7), 0.03)
+		return Vector3(0.06 * r, 0.075 * r, 0.0), 10, 14)
+	pod.material_override = shell
+	pod.position = Vector3(TIP_HINGE * side, -THICK * 0.5 - 0.04, mid + 0.42)
+	half.add_child(pod)
 
 	var trail: MeshInstance3D = Trail.new()
 	trail.source = tip
 	trail.offset = Vector3(TIP_LENGTH * 0.96 * side, 0, mid + HOOK * 1.15)
-	add_child(trail)
+	half.add_child(trail)
 	_halves.append([flap, tip, trail, side])
 
 
@@ -166,25 +173,34 @@ func _stations(from: float, to: float, side: float, count: int) -> PackedFloat32
 	return xs
 
 
+## Half the body's width and height at a share t of the way along it (0 the nose, 1 the tail).
+## It is the middle of a teardrop: from a little way in at the nose to most of the way down the tail.
+func _body_shape(t: float) -> Vector3:
+	var u: float = lerpf(0.12, 0.86, t)
+	var r: float = pow(sin(PI * pow(u, 0.6)), 0.75) * lerpf(1.0, 0.75, u)
+	return Vector3(0.43 * r, DECK * r, 0.0)
+
+
+const BODY_LONG := 2.25
+const BODY_Z := -0.05
+
+
+## How high the top of the body is at a given z.
+func _deck_at(z: float) -> float:
+	return _body_shape(clampf((z - BODY_Z) / BODY_LONG + 0.5, 0.0, 1.0)).y
+
+
 ## The body: a squashed teardrop with its nose and its tail cut off square, leaving a tube that
 ## is open at both ends (a wide mouth in front, the jet's narrow one behind).
 func _build_body(shell: Material, dark: Material) -> void:
-	var half := Vector2(0.43, DECK)
-	var teardrop := func(t: float) -> Vector3:
-		# Only the middle of the whole teardrop: from a little way in at the nose to most of the
-		# way down the tail.
-		var u: float = lerpf(0.12, 0.86, t)
-		var r: float = pow(sin(PI * pow(u, 0.6)), 0.75) * lerpf(1.0, 0.75, u)
-		return Vector3(half.x * r, half.y * r, 0.0)
-	var long: float = 2.25
 	var body := MeshInstance3D.new()
-	body.mesh = MeshKit.body(long, teardrop, 20, 20, 2.3)
+	body.mesh = MeshKit.body(BODY_LONG, _body_shape, 20, 20, 2.3)
 	body.material_override = shell
-	body.position = Vector3(0, 0, -0.05)
+	body.position = Vector3(0, 0, BODY_Z)
 	add_child(body)
 	# Dark inside both cut ends, leaving a rim of shell, so they read as openings.
 	for t: float in [0.0, 1.0]:
-		var rim: Vector3 = teardrop.call(t)
+		var rim: Vector3 = _body_shape(t)
 		var hole := MeshInstance3D.new()
 		var disc := CylinderMesh.new()
 		disc.top_radius = 1.0
@@ -194,96 +210,89 @@ func _build_body(shell: Material, dark: Material) -> void:
 		hole.mesh = disc
 		hole.material_override = dark
 		hole.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5).scaled(Vector3(rim.x * 0.84, rim.y * 0.8, 1.0)),
-				Vector3(0, 0, -0.05 + (t - 0.5) * long + (0.004 if t > 0.5 else -0.004)))
+				Vector3(0, 0, BODY_Z + (t - 0.5) * BODY_LONG + (0.004 if t > 0.5 else -0.004)))
 		add_child(hole)
 
 
-## A few small electronics housings: low boxes with a lamp or two, a dome, an aerial and a run
-## of conduit. Just enough to say there is something working inside.
+## The landing gear: two small hooked bars under the body, each a runner on two short legs
+## with its front end curled up like the tip of a ski.
+func _build_skids(shell: Material) -> void:
+	for side: float in [-1.0, 1.0]:
+		var x: float = 0.2 * side
+		var low: float = -0.34
+		add_child(MeshKit.rod(Vector3(x * 0.9, -0.1, -0.4), Vector3(x, low, -0.46), 0.016, shell))
+		add_child(MeshKit.rod(Vector3(x * 0.9, -0.1, 0.36), Vector3(x, low, 0.42), 0.016, shell))
+		add_child(MeshKit.rod(Vector3(x, low, -0.5), Vector3(x, low, 0.56), 0.018, shell))
+		add_child(MeshKit.rod(Vector3(x, low, -0.5), Vector3(x, low + 0.05, -0.64), 0.018, shell))
+		add_child(MeshKit.rod(Vector3(x, low + 0.05, -0.64), Vector3(x, low + 0.15, -0.71), 0.017, shell))
+
+
+## A few small electronics housings, each let into the surface it sits on (the body's top, or a
+## wing panel): low boxes with a lamp or two, a dome, an aerial, a run of conduit.
 func _build_electronics(dark: Material) -> void:
 	var casing: ShaderMaterial = Toon.paint(Color(0.62, 0.6, 0.55))
 	var brass: ShaderMaterial = Toon.shiny(Color(0.72, 0.56, 0.24))
 	var red: ShaderMaterial = Toon.glowing(Color(0.9, 0.2, 0.15), Color(1.6, 0.25, 0.15))
 	var green: ShaderMaterial = Toon.glowing(Color(0.3, 0.9, 0.5), Color(0.3, 1.4, 0.6))
-	# [where, size] of each box.
-	for box: Array in [
-			[Vector3(0, DECK - 0.01, -0.86), Vector3(0.22, 0.07, 0.2)],
-			[Vector3(0.24, DECK - 0.06, 0.66), Vector3(0.12, 0.06, 0.2)],
-			[Vector3(-0.78, THICK * 0.5, -0.3), Vector3(0.26, 0.05, 0.18)],
-			[Vector3(1.22, THICK * 0.5, -0.36), Vector3(0.18, 0.045, 0.24)],
-			[Vector3(-1.5, THICK * 0.5, -0.12), Vector3(0.12, 0.04, 0.12)]]:
-		var housing := MeshInstance3D.new()
-		var shape := BoxMesh.new()
-		shape.size = box[1]
-		housing.mesh = shape
-		housing.material_override = casing
-		housing.position = box[0]
-		add_child(housing)
-	# Lamps on the nose box, and one on the far wing.
 	var lamp := SphereMesh.new()
 	lamp.radius = 0.018
 	lamp.height = 0.036
 	lamp.radial_segments = 8
 	lamp.rings = 4
-	for spot: Array in [[Vector3(-0.06, DECK + 0.03, -0.9), red], [Vector3(0.06, DECK + 0.03, -0.9), green],
-			[Vector3(1.22, THICK * 0.5 + 0.03, -0.42), green]]:
-		var light := MeshInstance3D.new()
-		light.mesh = lamp
-		light.material_override = spot[1]
-		light.position = spot[0]
-		add_child(light)
-	# A brass dome behind where she stands, an aerial on the nose box, and conduit along the body.
+
+	# A box sunk into a surface whose top is at `top`: a third of it shows.
+	var housing := func(parent: Node3D, x: float, top: float, z: float, size: Vector3, light: Material) -> void:
+		var box := MeshInstance3D.new()
+		var shape := BoxMesh.new()
+		shape.size = size
+		box.mesh = shape
+		box.material_override = casing
+		box.position = Vector3(x, top - size.y * 0.18, z)
+		parent.add_child(box)
+		if light:
+			var bulb := MeshInstance3D.new()
+			bulb.mesh = lamp
+			bulb.material_override = light
+			bulb.position = Vector3(x + size.x * 0.25, top + size.y * 0.34, z - size.z * 0.2)
+			parent.add_child(bulb)
+
+	# On the body: one on the nose with two lamps and the aerial, one behind where she stands.
+	var nose_z: float = -0.82
+	housing.call(self, 0.0, _deck_at(nose_z), nose_z, Vector3(0.22, 0.07, 0.18), green)
+	var second := MeshInstance3D.new()
+	second.mesh = lamp
+	second.material_override = red
+	second.position = Vector3(-0.055, _deck_at(nose_z) + 0.024, nose_z - 0.036)
+	add_child(second)
+	add_child(MeshKit.rod(Vector3(0.07, _deck_at(nose_z), nose_z + 0.05), Vector3(0.09, _deck_at(nose_z) + 0.34, nose_z + 0.14), 0.006, dark))
+	housing.call(self, 0.1, _deck_at(0.66), 0.66, Vector3(0.12, 0.06, 0.18), null)
 	var dome := MeshInstance3D.new()
 	var cap := SphereMesh.new()
-	cap.radius = 0.07
-	cap.height = 0.07
+	cap.radius = 0.06
+	cap.height = 0.06
 	cap.is_hemisphere = true
 	cap.radial_segments = 12
 	cap.rings = 5
 	dome.mesh = cap
 	dome.material_override = brass
-	dome.position = Vector3(-0.2, DECK - 0.07, 0.72)
+	dome.position = Vector3(-0.1, _deck_at(0.74) - 0.012, 0.74)
 	add_child(dome)
-	add_child(MeshKit.rod(Vector3(0.08, DECK + 0.02, -0.8), Vector3(0.1, DECK + 0.36, -0.7), 0.006, dark))
-	add_child(MeshKit.rod(Vector3(0.33, 0.11, -0.7), Vector3(0.33, 0.1, 0.5), 0.014, dark))
-	add_child(MeshKit.rod(Vector3(-0.78, THICK * 0.5 + 0.01, -0.2), Vector3(-0.36, THICK * 0.5 + 0.01, -0.2), 0.01, dark))
+
+	# On the wings. These ride on the wing halves, so they tilt with them. The top of a panel
+	# is half its thickness up, a little less away from the middle of its chord.
+	var skin: float = THICK * 0.5 * 0.92
+	var left: Node3D = _wings[0]
+	var right: Node3D = _wings[1]
+	housing.call(left, -0.95, skin, -0.3, Vector3(0.26, 0.05, 0.18), null)
+	housing.call(left, -1.7, skin, -0.26, Vector3(0.12, 0.04, 0.12), red)
+	housing.call(right, 1.35, skin, -0.32, Vector3(0.18, 0.045, 0.24), green)
+	# Conduit from the left wing's box in to the body, lying on the panel.
+	left.add_child(MeshKit.rod(Vector3(-0.82, skin, -0.3), Vector3(-0.3, skin, -0.3), 0.012, dark))
 
 
 func _build_girl() -> void:
 	girl = Girl.new()
 	add_child(girl)
-	# Her short hair, pinned across the back of her head. (Her head's "back" is the skeleton's -Z.)
-	var hair: MeshInstance3D = Hair.new()
-	hair.anchor = girl.head_anchor
-	hair.root = girl.in_bone("head", Vector3(0, 0.07, -0.1))
-	hair.across = girl.in_bone("head", Vector3.RIGHT)
-	hair.link = 0.026
-	hair.width = 0.21
-	hair.end_width = 0.3
-	hair.color = Girl.COLOURS["hair"]
-	add_child(hair)
-	# Her scarf: knotted at the back of her neck, streaming out behind.
-	var scarf: MeshInstance3D = Hair.new()
-	scarf.anchor = girl.chest_anchor
-	scarf.root = girl.in_bone("chest", Vector3(0, 0.15, -0.07))
-	scarf.across = girl.in_bone("chest", Vector3.RIGHT)
-	scarf.link = 0.11
-	scarf.width = 0.12
-	scarf.end_width = 0.26
-	scarf.color = Color(0.82, 0.22, 0.18)
-	add_child(scarf)
-	# The scarf wound round her neck.
-	var wrap := MeshInstance3D.new()
-	var ring := TorusMesh.new()
-	ring.inner_radius = 0.045
-	ring.outer_radius = 0.085
-	ring.rings = 14
-	ring.ring_segments = 8
-	wrap.mesh = ring
-	wrap.material_override = Toon.paint(Color(0.82, 0.22, 0.18))
-	girl.chest_anchor.add_child(wrap)
-	wrap.transform = Transform3D(Basis(Quaternion(Vector3.UP, girl.in_bone("chest", Vector3.UP).normalized())),
-			girl.in_bone("chest", Vector3(0, 0.16, 0.0)))
 
 
 func _process(delta: float) -> void:
@@ -336,21 +345,23 @@ func _process(delta: float) -> void:
 
 ## Stand, crouch or hang on, by how the glider is moving, and pose her for it.
 func _pose_girl(delta: float) -> void:
-	# Climbing (or hauling back on the stick) she crouches; when it falls away she hangs on.
+	# In a real climb (or with the stick hauled right back) she crouches, and not before: an
+	# easy pull leaves her standing. As soon as the glider starts to drop away, or the stick is
+	# pushed over, her feet come off the deck and she hangs on.
 	var climb: float = glider.climb
-	var want_crouch: float = maxf(smoothstep(2.5, 9.0, climb), smoothstep(0.35, 0.9, glider.control.y))
-	var want_dangle: float = smoothstep(-6.0, -15.0, climb) * (1.0 - want_crouch)
+	var want_crouch: float = maxf(smoothstep(8.0, 17.0, climb), smoothstep(0.8, 1.0, glider.control.y) * 0.85)
+	var want_dangle: float = maxf(smoothstep(-3.5, -9.0, climb), smoothstep(-0.3, -0.75, glider.control.y)) * (1.0 - want_crouch)
 	var settle: float = 1.0 - exp(-4.5 * delta)
 	_crouch = lerpf(_crouch, want_crouch, settle)
 	_dangle = lerpf(_dangle, want_dangle, settle)
 	var stand: float = clampf(1.0 - _crouch - _dangle, 0.0, 1.0)
 
 	# The three poses, as where her hips are and how far forward she is bent (radians):
-	#   standing  legs nearly straight, bent well forward over her hands
+	#   standing  knees a little bent, bent well forward over her hands on the low hoops
 	#   crouched  hips down close to her heels, more upright
 	#   hanging   hips up and back off the deck, body stretched out flat behind her arms
-	var hips: Vector3 = Vector3(0, 0.93, 0.03) * stand + Vector3(0, 0.6, 0.16) * _crouch + Vector3(0, 0.88, 0.28) * _dangle
-	var lean: float = 1.15 * stand + 0.85 * _crouch + 1.42 * _dangle
+	var hips: Vector3 = Vector3(0, 0.76, 0.03) * stand + Vector3(0, 0.5, 0.18) * _crouch + Vector3(0, 0.74, 0.3) * _dangle
+	var lean: float = 1.3 * stand + 0.95 * _crouch + 1.45 * _dangle
 	# She leans into a turn a little.
 	var bank: float = atan2(-glider.basis.x.y, glider.basis.y.y)
 	var roll: float = clampf(bank * 0.12, -0.2, 0.2)
@@ -359,11 +370,11 @@ func _pose_girl(delta: float) -> void:
 	var feet: Array = []
 	# Her left is the glider's -X, and pose() wants [left, right].
 	for side: float in [-1.0, 1.0]:
-		# Her wrists sit just behind and above the bar her fingers are round.
-		hands.append(Vector3(GRIP.x * side, GRIP.y + 0.05, GRIP.z + 0.06))
+		# Her fists close round the top bar of each hoop.
+		hands.append(Vector3(GRIP.x * side, GRIP.y, GRIP.z))
 		# On the deck when standing or crouched; trailing out behind, swinging, when she hangs.
 		var planted := Vector3(0.11 * side, DECK + 0.08, 0.02 + _crouch * 0.1)
 		var swing: float = sin(_time * 5.0 + side * 1.3)
-		var trailing := Vector3(0.13 * side + swing * 0.04, 0.42 + swing * 0.09, 0.98)
+		var trailing := Vector3(0.13 * side + swing * 0.04, 0.3 + swing * 0.09, 0.98)
 		feet.append(planted.lerp(trailing, _dangle))
 	girl.pose(hips, lean, roll, hands, feet, _dangle)

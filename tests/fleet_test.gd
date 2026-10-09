@@ -1,5 +1,6 @@
 extends SceneTree
-## Checks the airships: the fleet is there, and the glider cannot fly through a hull or a wing.
+## Checks the airships: the fleets are there, the glider cannot fly through a hull or a wing, the
+## two sides wear each other down and sink each other, and they mostly leave her alone.
 ## Run: godot --headless --fixed-fps 60 --path . -s res://tests/fleet_test.gd
 
 const Main := preload("res://scenes/main.tscn")
@@ -71,6 +72,38 @@ func _run() -> void:
 		await process_frame
 	_check("the fleets fire on each other", flak.shots_fired > 40 and flak.bursts > 30, "%d shots, %d bursts with her out of range" % [flak.shots_fired, flak.bursts])
 	_check("fighters shoot fighters down", battle.squadron.losses > 0, "%d shot down in 40 s" % battle.squadron.losses)
+	var worst: float = 1.0
+	var hurt := 0
+	for side: Node3D in battle.fleets:
+		for ship: Node3D in side.ships:
+			worst = minf(worst, ship.health / ship.max_health)
+			if ship.health < ship.max_health or ship.losses > 0:
+				hurt += 1
+	_check("shells that reach a hull cost the ship health", flak.ship_hits > 20 and hurt >= 4 and worst < 0.9,
+			"%d hits, %d ships hurt, the worst down to %.0f%%" % [flak.ship_hits, hurt, worst * 100.0])
+	_check("both sides are being hit", _hurt(battle.fleets[0]) > 0 and _hurt(battle.fleets[1]) > 0,
+			"%d and %d ships hurt" % [_hurt(battle.fleets[0]), _hurt(battle.fleets[1])])
+	var at_her := 0
+	for side: Node3D in battle.fleets:
+		for ship: Node3D in side.ships:
+			at_her += ship.shots_at_glider
+	_check("with her out of the way nobody shoots at her", at_her == 0, "%d shots at her" % at_her)
+
+	# A beaten ship falls out of the sky, and a fresh one takes its place.
+	var victim: Node3D = battle.fleets[1].ships[1]
+	var bursts_before: int = flak.bursts
+	victim.take_hit(100000.0, victim.global_position)
+	var height: float = victim.position.y
+	for i in 600:
+		await physics_frame
+	_check("a ship with no health left goes down", victim.down and battle.ships_lost() > 0 and victim.position.y < height - 100.0 and flak.bursts > bursts_before + 5,
+			"fell %.0f m in 10 s, blowing up %d times" % [height - victim.position.y, flak.bursts - bursts_before])
+	_check("nobody wastes shells on a sinking ship", not _aimed_at(battle.fleets[0], victim), "")
+	battle.armed = false
+	for i in 60 * 50:
+		await physics_frame
+	_check("a fresh ship takes its place", not victim.down and victim.visible and victim.health == victim.max_health and absf(victim.position.y - height) < 60.0,
+			"down %s, health %.0f of %.0f, %.0f m off its height" % [victim.down, victim.health, victim.max_health, victim.position.y - height])
 	var strayed: float = 0.0
 	for fighter in battle.squadron.fighters:
 		strayed = maxf(strayed, fighter.node.position.distance_to(battle.centre))
@@ -84,9 +117,10 @@ func _run() -> void:
 		await physics_frame
 	var gap: float = flagship.position.distance_to(glider.position)
 	_check("the battle finds her again", gap < 9000.0, "flagship %.0f m away" % gap)
+	_check("and starts afresh", flagship.health == flagship.max_health and not flagship.down, "flagship health %.0f" % flagship.health)
 
-	# The guns: fly straight and level past the flagship, above its deck, and it should open fire,
-	# with the shells bursting close by.
+	# The guns: fly straight and level close past the flagship, above its deck, and its flak guns
+	# should open fire, with the shells bursting close by, while the rest keep to the war.
 	battle.armed = true
 	flak.shots_fired = 0
 	flak.bursts = 0
@@ -101,9 +135,36 @@ func _run() -> void:
 		await process_frame
 		# (She may be shot down and start again far away, so judge the aim as it goes.)
 		aim = maxf(aim, (-top.global_basis.z).dot((glider.position - top.global_position).normalized()))
-	_check("the turrets fire at her", flak.shots_fired > 10 and flak.bursts + flak.hits > 5 and flak.closest < 30.0,
-			"%d shots, %d bursts, %d hits, closest %.1f m, health %d" % [flak.shots_fired, flak.bursts, flak.hits, flak.closest, glider.health])
-	_check("the turrets track her", aim > 0.9, "aim %.2f" % aim)
+	_check("a flak gun fires at her up close", flagship.shots_at_glider >= 2 and flak.closest < 30.0,
+			"%d shots at her, %d hits, closest %.1f m, health %d" % [flagship.shots_at_glider, flak.hits, flak.closest, glider.health])
+	_check("it tracks her", aim > 0.9, "aim %.2f" % aim)
+	_check("most of the shooting is at the other fleet", flak.shots_fired > flagship.shots_at_glider * 4,
+			"%d shots in all, %d of them the flagship's at her" % [flak.shots_fired, flagship.shots_at_glider])
 
 	print("fleet_test: %d passed, %d failed" % [passed, failed])
 	quit(1 if failed > 0 else 0)
+
+
+func _hurt(side: Node3D) -> int:
+	var hurt := 0
+	for ship: Node3D in side.ships:
+		if ship.health < ship.max_health or ship.losses > 0:
+			hurt += 1
+	return hurt
+
+
+## Is any of a fleet's ships nearest to (and so shooting at) this one, though it is down?
+func _aimed_at(side: Node3D, victim: Node3D) -> bool:
+	for ship: Node3D in side.ships:
+		var nearest: Node3D = null
+		var best: float = ship.FOE_RANGE
+		for other: Node3D in ship.foes:
+			if other.down:
+				continue
+			var away: float = ship.global_position.distance_to(other.global_position)
+			if away < best:
+				best = away
+				nearest = other
+		if nearest == victim:
+			return true
+	return false

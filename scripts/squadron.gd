@@ -1,11 +1,11 @@
 extends Node3D
-## The fighters: small H-shaped gliders flown by each side's pilots. Two long booms joined by a
-## wing, with a pod in the middle under a glass canopy where the pilot sits.
+## The fighters: small H-shaped gliders flown by each side's pilots. Two wings, one ahead of the
+## other, joined by the fuselage, with the pilot under a glass canopy between them.
 ##
 ## They are not flown with the glider's flight model, just steered: each has a speed and may turn
-## only so fast. A fighter picks something to chase (the glider if she is near, otherwise one of
-## the other side's fighters), turns onto it, fires bolts when it is lined up and close, then
-## breaks away and comes round again. With nothing to chase it circles its own fleet. They keep
+## only so fast. A fighter picks something to chase (one of the other side's fighters; just one
+## fighter a side will go for the glider instead, and only if she comes near), turns onto it,
+## fires bolts when it is lined up and close, then breaks away and comes round again. With nothing to chase it circles its own fleet. They keep
 ## clear of the ground, the sea and the big ships. Fighters shoot each other down too; one that
 ## is hit goes up in a burst and a fresh one launches from its fleet a little later.
 
@@ -17,9 +17,9 @@ const PER_SIDE := 4
 const CRUISE := 38.0
 const CHASE := 46.0
 const TURN_RATE := 1.0
-## How near the glider has to be before fighters go for her, and how near anything has to be,
+## How near the glider has to be before a fighter goes for her, and how near anything has to be,
 ## and how well lined up, before they fire.
-const NOTICE := 1300.0
+const NOTICE := 600.0
 const GUN_REACH := 340.0
 const GUN_CONE := 0.09
 ## What each side is painted: [hull, trim].
@@ -160,15 +160,12 @@ func _fly(fighter: Fighter, delta: float) -> void:
 	fighter.node.transform = Transform3D(Basis.looking_at(heading, up) * Basis(Vector3.BACK, fighter.roll), at)
 
 
-## What should this fighter chase? The glider if she is near; otherwise the nearest of the other
-## side's fighters; otherwise nothing.
+## What should this fighter chase? The nearest of the other side's fighters, or nothing. Each
+## side's first fighter breaks off to go for the glider if she is near.
 func _choose(fighter: Fighter):
 	var at: Vector3 = fighter.node.position
-	if focus:
-		var away: float = at.distance_to(focus.global_position)
-		# Half of them go for her from a long way off; the rest only if she comes close.
-		if away < (NOTICE if fighter.slot % 2 == 0 else NOTICE * 0.4):
-			return focus
+	if focus and fighter.slot == 0 and at.distance_to(focus.global_position) < NOTICE:
+		return focus
 	var nearest = null
 	var best: float = 2600.0
 	for other: Fighter in fighters:
@@ -196,7 +193,7 @@ func _velocity_of(prey) -> Vector3:
 func _shoot(fighter: Fighter, at: Vector3, heading: Vector3) -> void:
 	var wild := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * 0.025
 	var dir: Vector3 = (heading + wild).normalized()
-	flak.fire(at + dir * 6.0, dir * flak.SHELL_SPEED, 1.9)
+	flak.fire(at + dir * 6.0, dir * flak.SHELL_SPEED, 1.9, fighter.side)
 	# Fighter against fighter is decided by chance, not by tracking every bolt.
 	if fighter.prey is Fighter and randf() < 0.05:
 		var prey: Fighter = fighter.prey
@@ -225,57 +222,54 @@ func _keep_clear(at: Vector3, want: Vector3) -> Vector3:
 	return want
 
 
-## The H-shaped fighter: two booms, the wing joining them, tail fins, engines, and the pod with
-## its glass canopy and the pilot's helmet inside. Forward is -Z.
+## The H-shaped fighter, seen from above an H lying on its side: two full wings, one ahead of the
+## other, joined by the fuselage with its glass canopy and the pilot's helmet inside. An engine
+## under each tip of the back wing, a fin standing on each. Forward is -Z.
 func _build(side: int) -> Node3D:
 	var hull: ShaderMaterial = Toon.paint(LIVERY[side][0])
 	var trim: ShaderMaterial = Toon.paint(LIVERY[side][1])
 	var dark: ShaderMaterial = Toon.paint(Color(0.12, 0.12, 0.14))
-	var glass: ShaderMaterial = Toon.glowing(Color(0.55, 0.8, 0.9), Color(0.12, 0.2, 0.24))
+	var glass: ShaderMaterial = Toon.shiny(Color(0.55, 0.8, 0.9), Color(0.12, 0.2, 0.24))
 	var burn: ShaderMaterial = Toon.glowing(Color(1.0, 0.6, 0.2), Color(2.0, 1.0, 0.3))
 	var node := Node3D.new()
 
-	var boom_shape := func(t: float) -> Vector3:
-		var r: float = maxf(pow(sin(PI * pow(t, 0.7)), 0.6), 0.08)
-		return Vector3(0.42 * r, 0.46 * r, 0.0)
-	for x: float in [-2.5, 2.5]:
-		var boom := MeshInstance3D.new()
-		boom.mesh = MeshKit.body(7.4, boom_shape, 10, 12)
-		boom.material_override = hull
-		boom.position = Vector3(x, 0, 0)
-		node.add_child(boom)
-		# A fin on the tail of each boom, and an engine glowing in it.
+	# The fuselage: the crossbar of the H, nose to tail.
+	var body_shape := func(t: float) -> Vector3:
+		var r: float = maxf(pow(sin(PI * pow(t, 0.62)), 0.6), 0.07)
+		return Vector3(0.58 * r, 0.56 * r, 0.0)
+	var body := MeshInstance3D.new()
+	body.mesh = MeshKit.body(8.4, body_shape, 12, 14)
+	body.material_override = hull
+	node.add_child(body)
+
+	# The two wings, the same span: one just behind the nose, one at the tail and a little higher.
+	var span := 4.3
+	var stations := PackedFloat32Array([-span, -span * 0.55, -0.4, 0.4, span * 0.55, span])
+	for pair: Array in [[-2.5, -0.08, 0.72, hull], [2.7, 0.3, 0.95, hull]]:
+		var chord: float = pair[2]
+		var wing := MeshInstance3D.new()
+		wing.mesh = MeshKit.slab(stations, func(s: float) -> Vector2:
+			var out: float = absf(s) / span
+			# Swept back a little and narrowing toward the tips.
+			return Vector2(-chord + out * 0.55, chord - out * 0.2), 0.16, 6)
+		wing.material_override = pair[3]
+		wing.position = Vector3(0, pair[1], pair[0])
+		node.add_child(wing)
+	for x: float in [-span * 0.9, span * 0.9]:
+		# A fin on each tip of the back wing, with an engine slung under it.
 		var fin := MeshInstance3D.new()
-		fin.mesh = MeshKit.slab(PackedFloat32Array([0.0, 0.3, 0.7, 1.1, 1.4]),
-				func(s: float) -> Vector2: return Vector2(-0.5 + s * 0.45, 0.45 - s * 0.1), 0.1, 4)
+		fin.mesh = MeshKit.slab(PackedFloat32Array([0.0, 0.35, 0.8, 1.2, 1.5]),
+				func(s: float) -> Vector2: return Vector2(-0.55 + s * 0.5, 0.5 - s * 0.1), 0.1, 4)
 		fin.material_override = trim
-		fin.transform = Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(x, 0.25, 3.0))
+		fin.transform = Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(x, 0.3, 2.95))
 		node.add_child(fin)
-		node.add_child(MeshKit.rod(Vector3(x, 0, 3.55), Vector3(x, 0, 3.75), 0.2, burn))
-		# The stub of wing outside each boom.
-		var stub := MeshInstance3D.new()
-		var outer: float = x + signf(x) * 1.5
-		stub.mesh = MeshKit.slab(PackedFloat32Array([minf(x, outer), (x + outer) * 0.5, maxf(x, outer)]),
-				func(s: float) -> Vector2: return Vector2(-0.55 + absf(absf(s) - 2.5) * 0.3, 0.6), 0.14, 5)
-		stub.material_override = trim
-		node.add_child(stub)
+		node.add_child(MeshKit.rod(Vector3(x, 0.02, 2.0), Vector3(x, 0.02, 3.5), 0.3, dark))
+		node.add_child(MeshKit.rod(Vector3(x, 0.02, 3.72), Vector3(x, 0.02, 3.8), 0.2, burn))
+	# Guns under the front wing.
+	for x: float in [-1.6, 1.6]:
+		node.add_child(MeshKit.rod(Vector3(x, -0.25, -3.9), Vector3(x, -0.25, -2.2), 0.09, dark))
 
-	# The crossbar of the H.
-	var wing := MeshInstance3D.new()
-	wing.mesh = MeshKit.slab(PackedFloat32Array([-2.5, -1.2, 0.0, 1.2, 2.5]),
-			func(_s: float) -> Vector2: return Vector2(-0.85, 0.85), 0.2, 6)
-	wing.material_override = hull
-	node.add_child(wing)
-
-	# The pod in the middle, with the canopy on top.
-	var pod_shape := func(t: float) -> Vector3:
-		var r: float = maxf(pow(sin(PI * pow(t, 0.65)), 0.7), 0.06)
-		return Vector3(0.62 * r, 0.5 * r, 0.0)
-	var pod := MeshInstance3D.new()
-	pod.mesh = MeshKit.body(3.6, pod_shape, 12, 12)
-	pod.material_override = hull
-	pod.position = Vector3(0, 0.12, -0.3)
-	node.add_child(pod)
+	# The canopy on top, between the wings.
 	var dome := SphereMesh.new()
 	dome.radius = 1.0
 	dome.height = 2.0
@@ -284,21 +278,20 @@ func _build(side: int) -> Node3D:
 	var canopy := MeshInstance3D.new()
 	canopy.mesh = dome
 	canopy.material_override = glass
-	canopy.scale = Vector3(0.46, 0.42, 0.95)
-	canopy.position = Vector3(0, 0.5, -0.55)
+	canopy.scale = Vector3(0.45, 0.5, 1.05)
+	canopy.position = Vector3(0, 0.5, -0.5)
 	node.add_child(canopy)
 	var helmet := MeshInstance3D.new()
 	helmet.mesh = dome
 	helmet.material_override = dark
 	helmet.scale = Vector3.ONE * 0.2
-	helmet.position = Vector3(0, 0.62, -0.5)
+	helmet.position = Vector3(0, 0.72, -0.45)
 	node.add_child(helmet)
 	# (The helmet shows as a dark shape through the top of the glass only from close by.)
-	canopy.scale *= 0.98
 
 	var trail: MeshInstance3D = Trail.new()
 	trail.source = node
-	trail.offset = Vector3(0, 0, 3.7)
+	trail.offset = Vector3(0, 0.3, 3.9)
 	trail.strength = 0.45
 	trail.width = 0.5
 	trail.tint = LIVERY[side][1]

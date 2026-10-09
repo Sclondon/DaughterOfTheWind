@@ -1,6 +1,7 @@
 extends Node3D
 ## One side's airships: a line of giant ships sailing round a wide circle. battle.gd makes two of
 ## these, puts them on the same circle side by side, and points each one's guns at the other.
+## Setting the fleet down somewhere (`place`, `place_on_circle`) makes every ship whole again.
 
 const Airship := preload("res://scripts/airship.gd")
 
@@ -50,12 +51,22 @@ func set_foes(foes: Array) -> void:
 		ship.foes = foes
 
 
-## Put the fleet on its circle with the flagship at an angle round it (radians).
+## Put the fleet on its circle with the flagship at an angle round it (radians). The others
+## follow it round the circle, each as far behind as the formation says.
 func place_on_circle(angle: float) -> void:
-	var out := Vector3(cos(angle), 0.0, sin(angle))
-	# Sailing along the circle: a quarter turn on from "outward".
-	var along := Vector3(-sin(angle), 0.0, cos(angle)) * turn
-	place(centre + out * radius, atan2(-along.x, -along.z))
+	for i in ships.size():
+		var ship: Node3D = ships[i]
+		var slot: Vector3 = FORMATION[i][0]
+		var at: float = angle - turn * slot.z / radius
+		var out := Vector3(cos(at), 0.0, sin(at))
+		# Sailing along the circle: a quarter turn on from "outward".
+		var along := Vector3(-sin(at), 0.0, cos(at)) * turn
+		var where: Vector3 = centre + out * (radius + slot.x) + Vector3.UP * slot.y
+		ship.heading = atan2(-along.x, -along.z)
+		ship.cruise_y = where.y
+		ship.position = where
+		ship.rotation = Vector3(0, ship.heading, 0)
+		ship.revive()
 
 
 ## Put the fleet down with its flagship at a point, flying along a heading (radians, 0 = -Z).
@@ -68,7 +79,7 @@ func place(flagship_at: Vector3, heading: float) -> void:
 		ship.cruise_y = at.y
 		ship.position = at
 		ship.rotation = Vector3(0, heading, 0)
-		ship.reset_physics_interpolation()
+		ship.revive()
 
 
 func _physics_process(delta: float) -> void:

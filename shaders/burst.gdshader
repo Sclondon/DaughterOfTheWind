@@ -2,11 +2,12 @@ shader_type spatial;
 render_mode unshaded, cull_disabled, fog_disabled;
 
 // A cartoon explosion puff, after The Wind Waker: a flat cloud with a scalloped edge, a dark
-// outline and a curl drawn inside it, turned to face the camera. It starts hot yellow, goes
-// orange, then cools to lilac smoke that hollows out from the middle and is gone. Solid colour
-// and cut-out edges only, no blending.
+// outline and a curl drawn inside it, turned to face the camera. A fire puff starts hot yellow,
+// goes orange, then chars to soot and hollows out from the middle. A smoke puff is sooty from
+// the start, lasts far longer, turns slowly and thins to grey before it breaks up. Wreckage is a
+// small jagged shard, glowing at first. Solid colour and cut-out edges only, no blending.
 //
-// Per puff, from flak.gd: INSTANCE_CUSTOM = (age 0..1, seed, kind (0 smoke, 1 the first flash), spin)
+// Per puff, from flak.gd: INSTANCE_CUSTOM = (age 0..1, seed, kind (0 a fire puff, 1 the first flash, 2 dark smoke, 3 a bit of wreckage), spin)
 
 varying vec4 puff;
 varying vec2 p;
@@ -28,37 +29,49 @@ void vertex() {
 
 void fragment() {
 	// A puff right in the lens would hide everything, so it thins out close to the camera.
-	if (smoothstep(7.0, 22.0, depth) < dither(FRAGCOORD.xy) + 0.02) {
+	if (depth < 22.0 && smoothstep(7.0, 22.0, depth) < dither(FRAGCOORD.xy) + 0.02) {
 		discard;
 	}
 	float age = puff.x;
 	float seed = puff.y;
-	float turn = seed * 6.283 + puff.w * age;
+	float turn = seed * 6.283 + puff.w * age * (puff.z > 1.5 ? 3.0 : 1.0);
 	vec2 q = mat2(vec2(cos(turn), sin(turn)), vec2(-sin(turn), cos(turn))) * p;
 	float r = length(q);
 	float a = atan(q.y, q.x);
 
-	if (puff.z > 0.5) {
+	if (puff.z > 0.5 && puff.z < 1.5) {
 		// The flash: an eight-pointed star that shrinks away at once.
 		float star = (0.45 + 0.55 * pow(abs(cos(a * 4.0)), 3.0)) * (1.0 - age);
 		if (r > star) {
 			discard;
 		}
 		ALBEDO = mix(vec3(1.0, 1.0, 0.9), vec3(1.0, 0.85, 0.3), smoothstep(0.0, star, r));
+	} else if (puff.z > 2.5) {
+		// Wreckage: a tumbling three-cornered shard, white hot, then orange, then black.
+		float shard = 0.3 + 0.65 * pow(abs(cos(a * 1.5 + seed * 5.0)), 2.5);
+		if (r > shard) {
+			discard;
+		}
+		ALBEDO = mix(mix(vec3(1.0, 0.9, 0.5), vec3(1.0, 0.45, 0.1), smoothstep(0.0, 0.25, age)), vec3(0.1, 0.09, 0.1), smoothstep(0.2, 0.6, age));
 	} else {
+		bool sooty = puff.z > 1.5;
 		// A lumpy cloud outline that shrinks a little at the very end.
 		float edge = (0.8 + 0.11 * cos(a * 5.0 + seed * 9.0) + 0.06 * cos(a * 9.0 - seed * 5.0)) * (1.0 - smoothstep(0.8, 1.0, age) * 0.5);
 		if (r > edge) {
 			discard;
 		}
 		// It hollows out from the middle as it thins.
-		float hole = (age - 0.5) * 1.9 + 0.1 * cos(a * 3.0 + seed * 4.0);
+		float hole = (age - (sooty ? 0.72 : 0.5)) * (sooty ? 3.2 : 1.9) + 0.1 * cos(a * 3.0 + seed * 4.0);
 		if (r < hole) {
 			discard;
 		}
 		vec3 hot = mix(vec3(1.0, 0.93, 0.55), vec3(1.0, 0.55, 0.16), smoothstep(0.05, 0.3, age));
-		vec3 smoke = mix(vec3(0.46, 0.38, 0.55), vec3(0.8, 0.77, 0.86), smoothstep(0.45, 1.0, age));
+		vec3 smoke = mix(vec3(0.36, 0.26, 0.3), vec3(0.17, 0.15, 0.2), smoothstep(0.4, 0.9, age));
 		vec3 col = mix(hot, smoke, smoothstep(0.22, 0.5, age));
+		if (sooty) {
+			// Sooty from the start, greying as it thins.
+			col = mix(vec3(0.15, 0.14, 0.19), vec3(0.42, 0.4, 0.48), smoothstep(0.35, 1.0, age));
+		}
 		// Two flat tones, lit from the upper right.
 		col *= mix(0.74, 1.0, step(-0.15, dot(q, vec2(0.6, 0.8)) / max(r, 0.01) * r));
 		// The curl: one arm of a spiral, drawn as a dark stroke.

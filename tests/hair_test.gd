@@ -27,8 +27,8 @@ func _run() -> void:
 			head.reset_physics_interpolation()
 			hair._process(1.0 / rate)
 			for strand: PackedVector3Array in hair._now:
-				worst = maxf(worst, strand[0].distance_to(strand[hair.LINKS]))
-		var full: float = hair.link * hair.LINKS
+				worst = maxf(worst, strand[0].distance_to(strand[hair.links]))
+		var full: float = hair.link * hair.links
 		var ok: bool = worst <= full * 1.02
 		if not ok:
 			failed += 1

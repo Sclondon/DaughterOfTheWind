@@ -94,8 +94,21 @@ func _run() -> void:
 	await _fly(8.0, Vector2.ZERO)
 	var v3: float = glider.airspeed
 	await _fly(3.0, Vector2.ZERO, true)
-	_check("boost adds speed and burns fuel", glider.airspeed > v3 + 8.0 and glider.burn < 0.5,
-			"speed %.1f -> %.1f, fuel %.2f" % [v3, glider.airspeed, glider.burn])
+	_check("boost adds speed", glider.airspeed > v3 + 8.0, "speed %.1f -> %.1f" % [v3, glider.airspeed])
+	await _fly(12.0, Vector2.ZERO, true)
+	_check("and never runs out", glider.boosting and glider.airspeed > v3 + 20.0, "still boosting after 15 s at %.1f m/s" % glider.airspeed)
+
+	# Pushing over should bite about as hard as pulling up, slow or fast.
+	for pace: float in [32.0, 60.0]:
+		var bends: Array = []
+		for way: float in [1.0, -1.0]:
+			glider.reset(Vector3(0, 900, 0))
+			glider.velocity = Vector3(0, 0, -pace)
+			await _fly(1.0, Vector2(0, way))
+			bends.append(absf(asin(glider.velocity.normalized().y)))
+		_check("at %d m/s a push dives about as hard as a pull climbs" % int(pace), bends[1] > bends[0] * 0.7 and bends[1] < bends[0] * 1.8,
+				"a second of pull bends the path %.0f deg up, of push %.0f deg down" % [rad_to_deg(bends[0]), rad_to_deg(bends[1])])
+	glider.reset(Vector3(0, 900, 0))
 
 	# A loop: boost, then hold the stick back all the way over the top and round again.
 	glider.reset(Vector3(0, 3000, 0))

@@ -26,6 +26,14 @@ static func glowing(color: Color, glow: Color) -> ShaderMaterial:
 	return mat
 
 
+## For a mesh painted with vertex colours whose alpha marks woven cloth (the girl).
+static func painted() -> ShaderMaterial:
+	var mat: ShaderMaterial = tinted()
+	mat.set_shader_parameter("weave", 1.0)
+	mat.set_shader_parameter("rim", 0.55)
+	return mat
+
+
 ## Matte, with the faint speckle of an eggshell.
 static func eggshell(color: Color) -> ShaderMaterial:
 	var mat: ShaderMaterial = paint(color)

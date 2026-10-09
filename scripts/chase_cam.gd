@@ -47,8 +47,11 @@ func _process(delta: float) -> void:
 	_up = _up.normalized()
 	_place(t)
 	var speed: float = target.airspeed
-	var want_fov: float = 68.0 + clampf((speed - 25.0) / 60.0, 0.0, 1.0) * 24.0
-	fov = lerpf(fov, want_fov, 1.0 - exp(-3.0 * delta))
+	# The view opens out with speed, and kicks wider still while the jet is lit.
+	var want_fov: float = 66.0 + clampf((speed - 25.0) / 55.0, 0.0, 1.0) * 26.0
+	if target.boosting:
+		want_fov += 12.0
+	fov = lerpf(fov, minf(want_fov, 108.0), 1.0 - exp(-4.0 * delta))
 
 
 func _place(t: Transform3D) -> void:

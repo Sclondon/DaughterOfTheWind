@@ -16,7 +16,6 @@ var rider_name := ""
 
 var _white: ColorRect
 var _stats: Label
-var _fuel: ProgressBar
 var _title: Label
 var _help: Label
 var _stick: Control
@@ -66,23 +65,6 @@ func _ready() -> void:
 	_hearts = _label(20, HORIZONTAL_ALIGNMENT_LEFT)
 	_hearts.add_theme_color_override("font_color", Color(1.0, 0.5, 0.45))
 	_pin(_hearts, 0.0, 1.0, 0.0, 1.0, Rect2(24, -132, 300, 30))
-
-	_fuel = ProgressBar.new()
-	_fuel.show_percentage = false
-	_fuel.min_value = 0.0
-	_fuel.max_value = 1.0
-	_fuel.custom_minimum_size = Vector2(170, 6)
-	var back := StyleBoxFlat.new()
-	back.bg_color = Color(1, 1, 1, 0.2)
-	back.set_corner_radius_all(3)
-	var fill := StyleBoxFlat.new()
-	fill.bg_color = Color(1.0, 0.86, 0.55, 0.95)
-	fill.set_corner_radius_all(3)
-	_fuel.add_theme_stylebox_override("background", back)
-	_fuel.add_theme_stylebox_override("fill", fill)
-	_fuel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_fuel)
-	_pin(_fuel, 0.0, 1.0, 0.0, 1.0, Rect2(24, -30, 170, 6))
 
 	var level := Button.new()
 	level.text = "%s  ›" % level_name
@@ -166,6 +148,5 @@ func _process(delta: float) -> void:
 	var climb: float = glider.climb
 	var arrow: String = "▲" if climb > 0.5 else ("▼" if climb < -0.5 else "–")
 	_stats.text = "%d km/h\n%d m  %s %.1f" % [int(glider.airspeed * 3.6), int(glider.position.y), arrow, absf(climb)]
-	_fuel.value = glider.burn
 	_hearts.text = "♥".repeat(glider.health)
 	_hearts.visible = glider.health < glider.MAX_HEALTH

@@ -29,6 +29,15 @@ func _run() -> void:
 		[1.57, 0.08, 4.2, 2.2, Vector2(0, 1), "crouch_side"],
 		[1.57, 0.08, 4.2, 2.2, Vector2(0, -1), "dangle_side"],
 		[2.4, 0.3, 6.5, 2.5, Vector2(1, 0), "roll_right"],
+		# Close on her: hands on the hoops, hair, scarf, skirt, and each pose.
+		[1.57, 0.15, 2.0, 2.2, Vector2.ZERO, "close_side"],
+		[0.45, 0.3, 1.9, 2.5, Vector2.ZERO, "close_front"],
+		[2.7, 0.35, 2.0, 2.5, Vector2.ZERO, "close_back"],
+		[4.4, 0.25, 2.0, 0.6, Vector2.ZERO, "close_other_side"],
+		[0.0, 0.9, 1.7, 2.5, Vector2.ZERO, "close_hands"],
+		[1.57, 0.15, 2.0, 2.2, Vector2(0, 0.6), "close_easy_pull"],
+		[1.57, 0.15, 2.0, 2.2, Vector2(0, 1), "close_crouch"],
+		[2.2, 0.25, 2.2, 2.5, Vector2(0, -1), "close_dangle"],
 	]
 	for i in views.size():
 		room.yaw = views[i][0]

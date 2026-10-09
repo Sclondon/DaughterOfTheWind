@@ -30,20 +30,27 @@ const SIDE_GRIP := 0.03
 const WEATHERVANE := 3.2
 ## Angle of attack (radians) a full pull asks for. Kept just under the stall.
 const AOA_CMD := 0.24
+## And a full push. The wing lifts even at no angle (CL0), so a push has to go further past
+## level than a pull does before it bites as hard: this is what makes diving as easy as climbing.
+const AOA_PUSH := 0.4
 const AOA_MAX := 0.26
-## How much of the extra pull a level turn needs is added for you.
-const TURN_ASSIST := 1.0
+## How much of the extra pull a level turn needs is added for you. Under 1 so that a banked
+## turn sinks a little rather than ballooning upward.
+const TURN_ASSIST := 0.7
 ## Hands off, the nose eases up out of a dive and down out of a climb, back toward a level glide.
 ## Without it a glider swings up and down for minutes (the phugoid). The stick overrides it.
-const SWING_DAMP := 0.22
+const SWING_DAMP := 0.3
+## Going faster than the glide, the wing makes more lift than her weight and the nose balloons
+## upward by itself. This much of that extra is trimmed away (0 none, 1 all of it) unless the
+## stick is pulled, so speed does not fling her up and a push starts from level, not from a climb.
+const SPEED_TRIM := 0.6
 const GLIDE_SLOPE := -0.06
 const MAX_BANK := 1.08
 const ROLL_GAIN := 3.2
 const ROLL_RATE := 2.4
 const STICK_SMOOTH := 7.0
+## The jet. There is no fuel: it pushes for as long as it is held.
 const THRUST := 15.0
-const BURN_TIME := 4.5
-const RECHARGE_TIME := 9.0
 const MAX_SPEED := 110.0
 const BODY_RADIUS := 2.2
 const MAX_HEALTH := 5
@@ -60,8 +67,6 @@ var air: Array = []
 var solids: Array = []
 
 var velocity := Vector3(0, 0, -31)
-## Jet fuel, 0..1. It refills when you are not burning it.
-var burn := 1.0
 var boosting := false
 var health := MAX_HEALTH
 var _mend := 0.0
@@ -79,7 +84,6 @@ var control := Vector2.ZERO
 var model: Node3D
 
 var _stick := Vector2.ZERO
-var _burn_locked := false
 var _last_air_dir := Vector3.ZERO
 
 
@@ -93,8 +97,6 @@ func reset(at: Vector3, heading: float = 0.0) -> void:
 	position = at
 	basis = Basis(Vector3.UP, heading)
 	velocity = -basis.z * 31.0
-	burn = 1.0
-	_burn_locked = false
 	_stick = Vector2.ZERO
 	_last_air_dir = Vector3.ZERO
 	health = MAX_HEALTH
@@ -160,12 +162,14 @@ func _physics_process(dt: float) -> void:
 		roll = clampf(-b.x.y * ROLL_GAIN * 1.5 + _stick.x * ROLL_RATE * 0.5, -ROLL_RATE, ROLL_RATE)
 	b = Basis(-b.z, roll * level_ish * authority * dt) * b
 
-	var ask: float = _stick.y * AOA_CMD
+	var ask: float = _stick.y * (AOA_CMD if _stick.y > 0.0 else AOA_PUSH)
 	if b.y.y > 0.0:
 		var cos_bank: float = maxf(cos(bank), 0.34)
 		ask += TURN_ASSIST * (CL0 / CL_SLOPE) * (1.0 / cos_bank - 1.0) * level_ish
+	var surplus: float = minf((GRAVITY / (LIFT * speed * speed) - CL0) / CL_SLOPE, 0.0)
+	ask += SPEED_TRIM * surplus * (1.0 - maxf(_stick.y, 0.0))
 	ask -= SWING_DAMP * (asin(clampf(air_dir.y, -1.0, 1.0)) - GLIDE_SLOPE) * (1.0 - absf(_stick.y))
-	ask = clampf(ask, -AOA_CMD, AOA_MAX)
+	ask = clampf(ask, -AOA_PUSH - 0.06, AOA_MAX)
 	var vane: float = WEATHERVANE * authority
 	b = Basis(b.x, ask * vane * dt) * b
 
@@ -184,7 +188,7 @@ func _physics_process(dt: float) -> void:
 	stalled = aoa > STALL_AOA
 	if stalled:
 		cl = (CL0 + CL_SLOPE * STALL_AOA) * maxf(0.35, 1.0 - (aoa - STALL_AOA) * 2.2)
-	cl = clampf(cl, -0.9, 2.0)
+	cl = clampf(cl, -1.1, 2.0)
 	var q: float = LIFT * speed * speed
 	var cd: float = CD0 + CD_INDUCED * cl * cl
 	if want_brake:
@@ -194,16 +198,9 @@ func _physics_process(dt: float) -> void:
 	# The wing resists sliding sideways, which is what makes a banked turn carve.
 	acc -= right * air.dot(right) * speed * SIDE_GRIP
 
-	if _burn_locked and burn > 0.25:
-		_burn_locked = false
-	boosting = want_boost and burn > 0.0 and not _burn_locked
+	boosting = want_boost
 	if boosting:
 		acc += fwd * THRUST
-		burn = maxf(burn - dt / BURN_TIME, 0.0)
-		if burn <= 0.0:
-			_burn_locked = true
-	elif not want_boost:
-		burn = minf(burn + dt / RECHARGE_TIME, 1.0)
 
 	velocity += acc * dt
 	velocity = velocity.limit_length(MAX_SPEED)

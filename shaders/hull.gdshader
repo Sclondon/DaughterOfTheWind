@@ -1,15 +1,19 @@
 shader_type spatial;
 
-// Airship plating: staggered riveted metal plates, each a slightly different tone, with dark seams
-// and rain streaks. UVs are in metres (see MeshKit.loft), so the plates are the same size on every
-// part. The fine detail fades with distance so a far-off ship does not sparkle.
+// Airship plating, after the big ships in the film: matte painted metal built up in sections.
+// There is no grid (the user asked for that look to go): mostly it is plain paint. A joint runs
+// round the hull every so often, at uneven spacings, as a narrow darker collar with a row of fat
+// rivets; each section between two joints has only a line or two along it, in different places
+// from the sections either side, and is a shade lighter or darker than they are. UVs are in
+// metres (see MeshKit.loft): UV.y runs along the part and UV.x around it. The fine detail fades
+// with distance so a far-off ship does not sparkle.
 
 #include "toon.gdshaderinc"
 
 uniform vec3 base_color : source_color = vec3(0.33, 0.35, 0.37);
-uniform vec3 streak_color : source_color = vec3(0.2, 0.17, 0.14);
-uniform vec2 plate = vec2(6.5, 4.0);
-// The hull also gets paintwork: a dark belly, a stripe at the waterline, and rows of lit portholes.
+// Roughly how long a section is and how wide a panel, in metres.
+uniform vec2 plate = vec2(26.0, 22.0);
+// The hull also gets paintwork: a dark belly, a stripe at the waterline, and a row of lit portholes.
 uniform bool is_hull = false;
 uniform float hull_length = 240.0;
 uniform float half_height = 17.0;
@@ -36,21 +40,41 @@ void fragment() {
 	float near = 1.0 - smoothstep(250.0, 900.0, dist);
 	float mid = 1.0 - smoothstep(1200.0, 3200.0, dist);
 
-	vec2 uv = UV / plate;
-	uv.x += floor(uv.y) * 0.5;
-	vec2 id = floor(uv);
-	vec2 f = fract(uv);
-	float tone = hash(id);
+	// Sections along the part: every boundary is pushed a different way off the even spacing.
+	float y = UV.y / plate.y;
+	float row = floor(y);
+	float cut = 0.15 + 0.7 * hash(vec2(row, 1.7));
+	float lo = cut;
+	float hi = 1.0 + 0.15 + 0.7 * hash(vec2(row + 1.0, 1.7));
+	if (fract(y) < cut) {
+		lo = -1.0 + 0.15 + 0.7 * hash(vec2(row - 1.0, 1.7));
+		hi = cut;
+		row -= 1.0;
+	}
+	float into = (fract(y) - lo) * plate.y;
+	float along_edge = min(into, (hi - fract(y)) * plate.y);
+	// Panels round the section, the same way, with a different set of cuts in every section.
+	float size = plate.x * mix(0.7, 1.6, hash(vec2(row, 4.3)));
+	float x = UV.x / size + hash(vec2(row, 9.1));
+	float col_id = floor(x);
+	float xcut = 0.2 + 0.6 * hash(vec2(col_id, row));
+	float xlo = xcut;
+	float xhi = 1.0 + 0.2 + 0.6 * hash(vec2(col_id + 1.0, row));
+	if (fract(x) < xcut) {
+		xlo = -1.0 + 0.2 + 0.6 * hash(vec2(col_id - 1.0, row));
+		xhi = xcut;
+		col_id -= 1.0;
+	}
+	float around_edge = min(fract(x) - xlo, xhi - fract(x)) * size;
+	vec2 id = vec2(col_id, row);
+	vec2 edge = vec2(around_edge, along_edge);
 
-	// Seams, kept about as wide as a pixel so they stay crisp without crawling.
-	vec2 edge = min(f, 1.0 - f) * plate;
+	// The lines, kept about as wide as a pixel so they stay crisp without crawling.
 	vec2 px = fwidth(UV) + 0.02;
-	float seam = min(smoothstep(0.0, 0.07 + px.x, edge.x), smoothstep(0.0, 0.07 + px.y, edge.y));
-
-	// A row of rivets just inside every seam.
-	float inset = min(edge.x, edge.y);
-	vec2 dot_uv = fract(UV / 0.55) - 0.5;
-	float rivet = (1.0 - smoothstep(0.14, 0.24, length(dot_uv))) * smoothstep(0.12, 0.2, inset) * (1.0 - smoothstep(0.45, 0.6, inset));
+	float seam = min(smoothstep(0.0, 0.05 + px.x, edge.x), smoothstep(0.0, 0.05 + px.y, edge.y));
+	// The collar either side of a joint, and the rivets along it.
+	float collar = 1.0 - smoothstep(0.75, 0.75 + px.y, edge.y);
+	float bolt = 1.0 - smoothstep(0.17, 0.25, length(vec2(edge.y - 0.4, (fract(UV.x / 2.4) - 0.5) * 2.4)));
 
 	vec3 paint = base_color;
 	float glow = 0.0;
@@ -59,30 +83,26 @@ void fragment() {
 		float t = l_pos.z / hull_length + 0.5;
 		float rel = (l_pos.y - half_height * 0.55 * t * t) / half_height;
 		float line = fwidth(rel) + 0.004;
-		paint = mix(paint, stripe_color, smoothstep(-0.2 - line, -0.2, rel) * (1.0 - smoothstep(-0.13, -0.13 + line, rel)));
+		paint = mix(paint, stripe_color, smoothstep(-0.2 - line, -0.2, rel) * (1.0 - smoothstep(-0.15, -0.15 + line, rel)));
 		paint = mix(belly_color, paint, smoothstep(-0.26 - line, -0.26, rel));
-		// Two rows of round portholes along each side.
-		if (abs(l_normal.x) > 0.55 && t > 0.1 && t < 0.8) {
-			for (int row = 0; row < 2; row++) {
-				float row_y = (row == 0 ? 0.02 : 0.24) * half_height;
-				vec2 q = vec2((fract(l_pos.z / 8.0 + float(row) * 0.5) - 0.5) * 8.0, (l_pos.y - half_height * 0.55 * t * t) - row_y);
-				float d = length(q);
-				float lit = step(0.35, hash(vec2(floor(l_pos.z / 8.0 + float(row) * 0.5), float(row) + sign(l_normal.x))));
-				float hole = 1.0 - smoothstep(0.8, 1.0 + fwidth(d), d);
-				paint = mix(paint, vec3(0.05), hole * mid);
-				glow += hole * lit * mid;
-				paint = mix(paint, paint * 0.55, smoothstep(1.5, 1.2, d) * (1.0 - hole) * near);
-			}
+		// One row of round portholes along each side.
+		if (abs(l_normal.x) > 0.55 && t > 0.12 && t < 0.78) {
+			float gap = 12.0;
+			vec2 q = vec2((fract(l_pos.z / gap) - 0.5) * gap, (l_pos.y - half_height * 0.55 * t * t) - 0.1 * half_height);
+			float d = length(q);
+			float lit = step(0.4, hash(vec2(floor(l_pos.z / gap), sign(l_normal.x))));
+			float hole = 1.0 - smoothstep(0.8, 1.0 + fwidth(d), d);
+			paint = mix(paint, vec3(0.05), hole * mid);
+			glow += hole * lit * mid;
+			paint = mix(paint, paint * 0.55, smoothstep(1.5, 1.2, d) * (1.0 - hole) * near);
 		}
 	}
 
-	vec3 col = paint * mix(0.86, 1.07, tone);
-	// Streaks run around the hull from the top, down the plates.
-	float streak = hash(vec2(floor(UV.y / 1.3), 3.0));
-	streak = smoothstep(0.72, 1.0, streak) * (0.5 + 0.5 * hash(id + 7.0));
-	col = mix(col, streak_color, streak * 0.45 * mid);
-	col *= mix(1.0, mix(0.62, 1.0, seam), mid);
-	col = mix(col, col * 1.5 + 0.03, rivet * near * 0.6);
+	// Each section is a shade lighter or darker than the next.
+	vec3 col = paint * mix(0.9, 1.06, hash(vec2(row, 2.2))) * mix(0.985, 1.015, hash(id));
+	col *= mix(1.0, 0.88, collar * mid);
+	col *= mix(1.0, mix(0.6, 1.0, seam), mid);
+	col = mix(col, col * 0.55, bolt * near * seam);
 
 	ALBEDO = col;
 	EMISSION = window_glow * glow * 1.4;

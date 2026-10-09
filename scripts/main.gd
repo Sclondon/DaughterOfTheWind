@@ -22,6 +22,9 @@ const FlightInput := preload("res://scripts/flight_input.gd")
 const ChaseCam := preload("res://scripts/chase_cam.gd")
 const Battle := preload("res://scripts/battle.gd")
 const SunGlare := preload("res://scripts/sun_glare.gd")
+const SpeedLines := preload("res://scripts/speed_lines.gd")
+const WindLines := preload("res://scripts/wind_lines.gd")
+const Motes := preload("res://scripts/motes.gd")
 const Coast := preload("res://scripts/coast.gd")
 const Hud := preload("res://scripts/hud.gd")
 const SkyShader := preload("res://shaders/sky.gdshader")
@@ -99,8 +102,17 @@ func _ready() -> void:
 		clouds.sea_enabled = false
 		clouds.altitude_shift = 760.0
 		clouds.wind = Vector3(5.0, 0.0, 0.7)
+	clouds.stirrer = glider
 	add_child(clouds)
 	glider.air.append(clouds)
+
+	# Things in the air to steer by: the wind drawn as white streaks, and dust that slides past.
+	var gusts: MeshInstance3D = WindLines.new()
+	gusts.wind = clouds.wind
+	add_child(gusts)
+	var dust: MultiMeshInstance3D = Motes.new()
+	dust.flyer = glider
+	add_child(dust)
 
 	if level == "coast":
 		coast = Coast.new()
@@ -115,16 +127,24 @@ func _ready() -> void:
 		glider.solids.append(coast)
 		start = coast.start_position()
 		start_heading = coast.start_heading()
-		# The battle circles out over the sea, off to her right as she comes in toward the valley.
-		_battle_at = Vector3(coast.shore_x(0.0) - 5200.0, 640.0, 4500.0)
-		_battle_angle = -0.9
+		# The battle is fought at the mouth of the valley: the two fleets wheel round each other
+		# just off the beach, straight ahead of her as she comes in.
+		_battle_at = Vector3(coast.shore_x(0.0) - 1800.0, 640.0, 0.0)
+		_battle_angle = PI
 	if use_fleet:
 		battle = Battle.new()
 		battle.focus = glider
 		battle.land = coast
+		if level == "coast":
+			battle.radius = 900.0
+			battle.roams = false
 		add_child(battle)
 		fleet = battle.fleets[0]
 		glider.solids.append(battle)
+		# The airships plough through the clouds and leave tunnels in them.
+		for side: Node3D in battle.fleets:
+			for ship: Node3D in side.ships:
+				clouds.add_stirrer(ship, (ship.length as float) * 0.13, ship.length)
 		glider.downed.connect(restart, CONNECT_DEFERRED)
 
 	cam = ChaseCam.new()
@@ -142,6 +162,9 @@ func _ready() -> void:
 	glare.clouds = clouds
 	glare.land = coast
 	lens.add_child(glare)
+	var rush: ColorRect = SpeedLines.new()
+	rush.flyer = glider
+	lens.add_child(rush)
 
 	if show_hud:
 		hud = Hud.new()

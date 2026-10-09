@@ -2,16 +2,18 @@ extends Node3D
 ## The war in the sky: two fleets of airships fighting each other, and their fighters.
 ##
 ## The fleets sail the same wide circle side by side, a broadside apart, each ship's turrets
-## hammering the ship opposite. The glider is fair game to both. Their fighters (squadron.gd)
-## tangle above and between them. All the shells and explosions are one flak.gd.
+## hammering the ship opposite until one of them goes down (airship.gd: health, sinking, a fresh
+## ship in its place). Their fighters (squadron.gd) tangle above and between them. The war is
+## with each other: the glider only draws fire from the odd flak gun and one fighter a side,
+## and only up close. All the shells and explosions are one flak.gd.
 ##
-## When the glider leaves the battle far behind, the whole thing is set down again nearer her.
+## Over the clouds, when the glider leaves the battle far behind the whole thing is set down
+## again nearer her. On the coast it stays put, at the mouth of the valley.
 
 const Fleet := preload("res://scripts/fleet.gd")
 const Flak := preload("res://scripts/flak.gd")
 const Squadron := preload("res://scripts/squadron.gd")
 
-const RADIUS := 2600.0
 ## How far apart the two lines sail.
 const GAP := 720.0
 const LOST_DISTANCE := 9500.0
@@ -21,6 +23,10 @@ var focus: Node3D
 var land: Node
 ## The middle of the circle the fleets sail round.
 var centre := Vector3(0, 560, -2600)
+## How wide the circle is (the inner fleet's; the outer sails GAP further out).
+var radius := 2600.0
+## True moves the battle to wherever the glider goes. False keeps it where it was put.
+var roams := true
 
 var fleets: Array = []
 var flak: Node3D
@@ -48,6 +54,7 @@ func _ready() -> void:
 		fleet.armed = armed
 		add_child(fleet)
 		fleets.append(fleet)
+	flak.fleets = fleets
 	fleets[0].set_foes(fleets[1].ships)
 	fleets[1].set_foes(fleets[0].ships)
 	squadron = Squadron.new()
@@ -66,10 +73,19 @@ func place(middle: Vector3, angle: float) -> void:
 	for side in 2:
 		var fleet: Node3D = fleets[side]
 		fleet.centre = centre + Vector3(0, side * 70.0, 0)
-		fleet.radius = RADIUS + side * GAP
+		fleet.radius = radius + side * GAP
 		fleet.turn = 1.0
 		fleet.place_on_circle(angle)
 	squadron.regroup()
+
+
+## How many ships have gone down so far, both sides together.
+func ships_lost() -> int:
+	var lost := 0
+	for fleet: Node3D in fleets:
+		for ship: Node3D in fleet.ships:
+			lost += ship.losses
+	return lost
 
 
 ## Checks a ball against every ship of both fleets. See Airship.hit().
@@ -82,7 +98,7 @@ func hit(world: Vector3, ball: float) -> Vector3:
 
 
 func _physics_process(_delta: float) -> void:
-	if focus == null:
+	if focus == null or not roams:
 		return
 	var away := Vector2(focus.position.x - centre.x, focus.position.z - centre.z)
 	if away.length() < LOST_DISTANCE:
@@ -95,7 +111,7 @@ func _physics_process(_delta: float) -> void:
 	var ahead: Vector3 = -focus.basis.z
 	ahead.y = 0.0
 	ahead = ahead.normalized() if ahead.length() > 0.01 else Vector3.FORWARD
-	var middle: Vector3 = focus.position + ahead * (RADIUS + 1500.0)
+	var middle: Vector3 = focus.position + ahead * (radius + 1500.0)
 	middle.y = clampf(focus.position.y, 450.0, 900.0)
 	# Start the flagships on the near side of the circle.
 	place(middle, atan2(-ahead.z, -ahead.x))

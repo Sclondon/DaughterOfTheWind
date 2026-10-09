@@ -1,25 +1,35 @@
 extends Node3D
 ## The Windward Coast: the sea to the west, and to the east a wall of towering cliffs that runs
-## north and south for ever. The cliffs climb out of the water in great steps, and the people live
-## on the steps: every ledge is terraced fields, with hamlets and windmills built into the
-## cliffside. The top is wild grass and woods. In one place a broad, gently sloping valley cuts
-## down through the cliffs to a beach, and the castle stands in it with its town around it.
-## The sea off the cliffs is a maze of rock spires and arches to weave through, and giant old
-## trees stand in the valley and here and there along the cliffs.
+## north and south for ever. The cliffs climb out of the water in great broken steps, ribbed with
+## buttresses and gullies, hung with outcrops and standing rock towers. People live in them:
+## cities are built into the cliff face, houses stacked on houses up the rock, laced together
+## with stairways and arched viaducts, with towers standing over them. Here and there a ledge
+## is still terraced fields. The top is wild grass and woods.
+##
+## In one place a broad, gently sloping valley cuts down through the cliffs to a beach, and the
+## castle stands in it with its town and a grove of giant old trees. Every couple of kilometres
+## along the coast a trench does the same, far narrower: a slot of sea running in between sheer
+## walls, crossed by a high arched bridge, to fly up and under.
+##
+## The sea off the cliffs is a maze of rock spires and arches to weave through. Far inland, behind
+## it all, stands a painted backdrop (shaders/backdrop): a wood of great trees, hills, and two
+## ranges of mountains, drawn as flat cut-outs.
 ##
 ## The shape of the land is one function, height_at(x, z). The ground is cut into square chunks
 ## that stream in around `focus` and are freed behind it: fine ones close by, coarse ones far off,
-## none for open sea. Each chunk grows its own hamlets, windmills, trees and spires from a seed,
+## none for open sea. Each chunk grows its own city, towers, rocks, trees and spires from a seed,
 ## so a place always has the same things in it.
 ##
 ## For the glider this node is both a solid and a wind:
-##   hit(p, radius)  pushes it back out of the ground, the sea, spires, towers and windmills
+##   hit(p, radius)  pushes it back out of the ground, the sea, spires, towers, bridges and windmills
 ##   wind_at(p)      the sea wind is pushed upward where it meets rising ground, so there is lift
 ##                   all along the cliffs to soar on, and sink behind the hills
 
 const MeshKit := preload("res://scripts/mesh_kit.gd")
 const TerrainShader := preload("res://shaders/terrain.gdshader")
 const OceanShader := preload("res://shaders/ocean.gdshader")
+const BuildingShader := preload("res://shaders/building.gdshader")
+const BackdropShader := preload("res://shaders/backdrop.gdshader")
 const Toon := preload("res://scripts/toon.gd")
 
 ## The cliffs: how far in from the shore they reach (m), how many steps they climb in, how tall
@@ -29,10 +39,15 @@ const TERRACES := 4
 const CLIFF_HEIGHT := 720.0
 const WALL_SHARE := 0.34
 ## The valley: where it meets the sea (z), and half its width there.
-## shaders/ocean.gdshader repeats shore_x(), the valley and the sea bed, and shaders/terrain
-## repeats river_z(): keep them in step.
+## shaders/ocean.gdshader repeats shore_x(), the valley, the trenches and the sea bed, and
+## shaders/terrain repeats river_z(): keep them in step.
 const VALLEY_Z := 0.0
 const VALLEY_HALF := 640.0
+## The trenches: one to every this many metres of coast (none where the valley is), half their
+## width at the mouth, and how far in the sea runs before the floor climbs out of it.
+const TRENCH_SPACING := 2200.0
+const TRENCH_HALF := 190.0
+const TRENCH_WATER := 380.0
 ## How far up the valley the castle stands.
 const CASTLE_INLAND := 1250.0
 ## The wind off the sea, blowing onto the cliffs.
@@ -46,9 +61,23 @@ const CELL_COARSE := 64.0
 const FINE_RADIUS := 2
 const PROP_RADIUS := 4
 const VIEW_RADIUS := 8
+## Points along one side of a fine chunk's grid of heights: its cells, plus one all round.
+const GRID_W := 35
 ## Milliseconds of chunk building allowed per frame while flying.
 const BUILD_BUDGET := 7.0
 const OCEAN_SIZE := 34000.0
+## The painted backdrop: how far inland each of its four flats stands (the wood, the hills, the
+## mountains, the far range), and the nearest each is let come to the glider. The last is the
+## size of the piece of sphere they are drawn on (inside the camera's range).
+const BACKDROP_INLAND := [7000.0, 10000.0, 15000.0, 23000.0]
+const BACKDROP_KEEP := [6500.0, 9500.0, 14000.0, 21000.0]
+const BACKDROP_RADIUS := 14500.0
+
+## Plaster and roof tiles for the cities.
+const PLASTER := [Color(0.93, 0.88, 0.76), Color(0.95, 0.94, 0.9), Color(0.9, 0.74, 0.5), Color(0.87, 0.66, 0.57),
+		Color(0.82, 0.74, 0.6), Color(0.74, 0.81, 0.84), Color(0.92, 0.82, 0.62)]
+const TILES := [Color(0.7, 0.33, 0.2), Color(0.56, 0.27, 0.2), Color(0.62, 0.3, 0.16), Color(0.3, 0.38, 0.5), Color(0.25, 0.44, 0.45)]
+const STONE := Color(0.72, 0.68, 0.6)
 
 var focus: Node3D
 var noise_tex: Texture2D
@@ -66,23 +95,35 @@ class Chunk:
 	var ground: MeshInstance3D  # null over open sea
 	var fine := false
 	var props: Node3D  # null until the focus has come within PROP_RADIUS
+	# Heights on the fine grid (GRID_W x GRID_W, one cell beyond the chunk all round). Empty
+	# until something needs it.
+	var grid := PackedFloat32Array()
 	var columns: Array = []
-	var capsules: Array = []  # arches, as runs of [Vector3 from, Vector3 to, float radius]
+	var capsules: Array = []  # arches and bridge decks, as runs of [Vector3 from, Vector3 to, float radius]
 	var arches := 0
 	var great_trees := 0
 	var houses := 0
-	var ledge_houses := 0
+	var city_houses := 0
+	var towers := 0
+	var stairs := 0
+	var bridges := 0
 	var windmills := 0
 	var spires := 0
+	var rock_towers := 0
+	var outcrops := 0
 
 
 var _hills := FastNoiseLite.new()
 var _woods := FastNoiseLite.new()
 var _ground_mat: ShaderMaterial
 var _rock_mat: ShaderMaterial
+var _outcrop_mat: ShaderMaterial
 var _house_mat: ShaderMaterial
+var _building_mat: ShaderMaterial
+var _backdrop_mat: ShaderMaterial
 var _paints := {}
 var _ocean: MeshInstance3D
+var _backdrop: MeshInstance3D
 var _chunks := {}  # Vector2i -> Chunk
 var _queue: Array = []  # chunk keys waiting for work, nearest first
 var _centre = null
@@ -94,6 +135,8 @@ var _box := BoxMesh.new()
 var _prism := PrismMesh.new()
 var _blob := SphereMesh.new()
 var _crown := SphereMesh.new()
+var _arch: ArrayMesh
+var _rock: ArrayMesh
 var _leaf_mat: ShaderMaterial
 
 
@@ -114,6 +157,8 @@ func _ready() -> void:
 	_crown.radial_segments = 14
 	_crown.rings = 9
 	_leaf_mat = Toon.tinted()
+	_arch = _make_arch()
+	_rock = _make_rock()
 
 	_ground_mat = ShaderMaterial.new()
 	_ground_mat.shader = TerrainShader
@@ -122,7 +167,11 @@ func _ready() -> void:
 	_ground_mat.set_shader_parameter("rim", 0.0)
 	_rock_mat = _ground_mat.duplicate() as ShaderMaterial
 	_rock_mat.set_shader_parameter("use_farms", false)
+	_outcrop_mat = _rock_mat.duplicate() as ShaderMaterial
+	_outcrop_mat.set_shader_parameter("all_rock", true)
 	_house_mat = Toon.tinted()
+	_building_mat = ShaderMaterial.new()
+	_building_mat.shader = BuildingShader
 	for paint: Array in [["cream", Color(0.9, 0.86, 0.76), 0.9], ["cap", Color(0.55, 0.25, 0.18), 0.7],
 			["sail", Color(0.95, 0.93, 0.86), 0.8], ["timber", Color(0.35, 0.25, 0.18), 0.9],
 			["stone", Color(0.76, 0.72, 0.64), 0.9], ["slate", Color(0.24, 0.33, 0.45), 0.6],
@@ -134,8 +183,10 @@ func _ready() -> void:
 	castle = Vector3(cx, 0.0, river_z(cx) + 210.0)
 	castle.y = height_at(castle.x, castle.z)
 	_build_ocean()
+	_build_backdrop()
 	_build_castle()
 	if focus:
+		_follow()
 		prewarm()
 
 
@@ -153,11 +204,22 @@ func _process(delta: float) -> void:
 		hub.rotate_object_local(Vector3.BACK, delta * 0.9)
 	if focus == null:
 		return
-	_ocean.position = Vector3(focus.global_position.x, 0.0, focus.global_position.z)
+	_follow()
 	_look_around()
 	var began: int = Time.get_ticks_usec()
 	while not _queue.is_empty() and float(Time.get_ticks_usec() - began) < BUILD_BUDGET * 1000.0:
 		_work(_queue.pop_front())
+
+
+## Keep the sea and the backdrop centred on the glider.
+func _follow() -> void:
+	var at: Vector3 = focus.global_position
+	_ocean.position = Vector3(at.x, 0.0, at.z)
+	_backdrop.position = Vector3(at.x, 0.0, at.z)
+	# The flats stand where they stand, but back away if she flies inland at them.
+	_backdrop_mat.set_shader_parameter("planes", Vector4(
+			maxf(BACKDROP_INLAND[0], at.x + BACKDROP_KEEP[0]), maxf(BACKDROP_INLAND[1], at.x + BACKDROP_KEEP[1]),
+			maxf(BACKDROP_INLAND[2], at.x + BACKDROP_KEEP[2]), maxf(BACKDROP_INLAND[3], at.x + BACKDROP_KEEP[3])))
 
 
 ## Build everything in range right now, instead of a little each frame.
@@ -167,16 +229,21 @@ func prewarm() -> void:
 		_work(_queue.pop_front())
 
 
-## What is standing right now, for the tests: chunks, houses (and how many of them are on the
-## cliff ledges), windmills and spires.
+## What is standing right now, for the tests.
 func stats() -> Dictionary:
-	var out := {"chunks": _chunks.size(), "houses": 0, "ledge_houses": 0, "windmills": 0, "spires": 0, "arches": 0, "great_trees": 0}
+	var out := {"chunks": _chunks.size(), "houses": 0, "city_houses": 0, "towers": 0, "stairs": 0, "bridges": 0,
+			"windmills": 0, "spires": 0, "rock_towers": 0, "outcrops": 0, "arches": 0, "great_trees": 0}
 	for key: Vector2i in _chunks:
 		var chunk: Chunk = _chunks[key]
 		out["houses"] += chunk.houses
-		out["ledge_houses"] += chunk.ledge_houses
+		out["city_houses"] += chunk.city_houses
+		out["towers"] += chunk.towers
+		out["stairs"] += chunk.stairs
+		out["bridges"] += chunk.bridges
 		out["windmills"] += chunk.windmills
 		out["spires"] += chunk.spires
+		out["rock_towers"] += chunk.rock_towers
+		out["outcrops"] += chunk.outcrops
 		out["arches"] += chunk.arches
 		out["great_trees"] += chunk.great_trees
 	return out
@@ -210,9 +277,47 @@ func river_z(x: float) -> float:
 ## ragged, with spurs and side-hollows, not a clean trough.
 func valley(x: float, z: float) -> float:
 	var d: float = maxf(inland(x, z), 0.0)
-	var half: float = VALLEY_HALF + d * 0.08
+	var across: float = absf(z - valley_mid(x)) / (VALLEY_HALF + d * 0.08)
+	if across > 1.3:
+		return 0.0
 	var ragged: float = _hills.get_noise_2d(x * 1.3 + 50.0, z * 1.3) * 0.26 * smoothstep(0.0, 300.0, d)
-	return 1.0 - smoothstep(0.3, 1.0, absf(z - valley_mid(x)) / half + ragged)
+	return 1.0 - smoothstep(0.3, 1.0, across + ragged)
+
+
+## Which trench a stretch of coast belongs to. Number 0 is the valley's stretch and has none.
+func trench_index(z: float) -> int:
+	return int(floorf(z / TRENCH_SPACING + 0.5))
+
+
+## Where trench k meets the sea (its z). (Plain sines again, for the ocean's shader.)
+func trench_z(k: int) -> float:
+	return (float(k) + 0.3 * sin(float(k) * 2.4 + 1.0)) * TRENCH_SPACING
+
+
+## The middle of trench k (its z) at a given x: they wind more tightly than the valley.
+func trench_mid(k: int, x: float) -> float:
+	return trench_z(k) + 110.0 * sin(x / 330.0 + float(k) * 1.7)
+
+
+## Half the width of trench k, d metres inland: each has its own, and they pinch in as they go.
+func trench_half(k: int, d: float) -> float:
+	return TRENCH_HALF * (0.75 + 0.25 * sin(float(k) * 5.1)) * (1.0 - 0.45 * smoothstep(400.0, 2600.0, d))
+
+
+## 0..1: how far into a trench a point is. 1 on its floor, 0 outside. The sides are sheer.
+func trench(x: float, z: float) -> float:
+	var k: int = trench_index(z)
+	if k == 0:
+		return 0.0
+	var across: float = absf(z - trench_mid(k, x)) / trench_half(k, inland(x, z))
+	if across >= 1.0:
+		return 0.0
+	return 1.0 - smoothstep(0.5, 1.0, across)
+
+
+## The floor of a trench, d metres inland: under the sea at first, then a long climb to the top.
+func trench_floor(d: float) -> float:
+	return -14.0 + maxf(d - TRENCH_WATER, 0.0) * 0.26
 
 
 ## Height of the ground (or the sea bed, below zero) at a point.
@@ -225,14 +330,23 @@ func height_at(x: float, z: float) -> float:
 	# The cliffs: straight up out of the water, in steps. A wall, a ledge, a wall, a ledge... The
 	# ledges wander (the noise), so they widen and pinch out instead of running like contour lines.
 	var u: float = d / CLIFF_WIDTH
+	var broken: float = smoothstep(0.03, 0.2, u)
 	var step_at: float = u * TERRACES + _hills.get_noise_2d(x * 0.7 + 300.0, z * 0.7) * 0.5 * smoothstep(0.08, 0.35, u)
+	# Buttresses and gullies: the walls are pushed out along sharp ribs and cut back between them.
+	step_at += (0.4 - 2.0 * absf(_hills.get_noise_2d(x * 4.0 + 40.0, z * 4.0))) * 0.5 * broken
 	step_at = clampf(step_at, 0.0, float(TERRACES))
 	var stairs: float = (floorf(step_at) + smoothstep(0.0, WALL_SHARE, step_at - floorf(step_at))) / float(TERRACES)
 	var cliff: float = CLIFF_HEIGHT * (0.82 + 0.18 * _hills.get_noise_2d(x * 0.3 + 900.0, z * 0.3))
 	# Above the last step, a tableland that rolls and climbs slowly inland.
 	var high: float = stairs * cliff + smoothstep(CLIFF_WIDTH, CLIFF_WIDTH + 5000.0, d) * 150.0 \
 			+ _hills.get_noise_2d(x, z) * 50.0 * smoothstep(CLIFF_WIDTH, CLIFF_WIDTH + 600.0, d)
+	# Lumps and hollows all over the cliff, so no ledge is level and no wall is a plane.
+	if d < CLIFF_WIDTH * 1.5:
+		high += _hills.get_noise_2d(x * 5.0 + 7.0, z * 5.0 + 60.0) * 13.0 * broken * (1.0 - smoothstep(CLIFF_WIDTH * 1.05, CLIFF_WIDTH * 1.5, d))
 	if v <= 0.0:
+		var t: float = trench(x, z)
+		if t > 0.0:
+			high = lerpf(high, minf(trench_floor(d), high), t)
 		return high
 	# The valley floor: a beach, then a long gentle climb over hummocks and hollows, with the
 	# stream in a dip down the middle.
@@ -252,19 +366,28 @@ func normal_at(x: float, z: float) -> Vector3:
 			height_at(x, z - e) - height_at(x, z + e)).normalized()
 
 
-## 0..1: how much a point is farmland: the cliff's ledges and the valley floor. The top is left
-## wild. (The ground mesh also keeps fields off the walls, by slope.)
+## 0..1: how much a point is farmland: the valley floor, and a ledge of the cliffs here and
+## there (most of the cliffs are rock and city). The top is left wild. (The ground mesh also
+## keeps fields off the walls, by slope.)
 func farm_at(x: float, z: float) -> float:
 	var d: float = inland(x, z)
-	var ledges: float = smoothstep(20.0, 60.0, d) * (1.0 - smoothstep(CLIFF_WIDTH * 0.97, CLIFF_WIDTH * 1.06, d))
+	var ledges: float = smoothstep(20.0, 60.0, d) * (1.0 - smoothstep(CLIFF_WIDTH * 0.97, CLIFF_WIDTH * 1.06, d)) \
+			* smoothstep(0.1, 0.3, _woods.get_noise_2d(900.0, z * 0.22)) * (1.0 - trench(x, z))
 	return maxf(ledges, smoothstep(0.55, 0.8, valley(x, z)) * smoothstep(330.0, 420.0, d))
+
+
+## 0..1: how built-up the cliffs are at a point. The cities come and go along the coast.
+func city_at(x: float, z: float) -> float:
+	if valley(x, z) > 0.0:
+		return 0.0
+	return smoothstep(-0.12, 0.2, _woods.get_noise_2d(z * 0.25, 333.0))
 
 
 ## Is this a spot on one of the cliff's ledges, flat enough to build on?
 func on_ledge(x: float, z: float) -> bool:
 	var d: float = inland(x, z)
 	return d > 60.0 and d < CLIFF_WIDTH * 0.95 and valley(x, z) < 0.05 and height_at(x, z) > 60.0 \
-			and normal_at(x, z).y > 0.97
+			and normal_at(x, z).y > 0.95
 
 
 # ----------------------------------------------------------------------------------------------
@@ -316,25 +439,61 @@ func _needs_work(key: Vector2i) -> bool:
 
 
 ## Bring one chunk up to date: make it, refine or coarsen its ground, or grow its buildings.
+## One job at a time: a chunk that needs both its ground and its buildings goes back on the
+## front of the queue for the second, so the two never land in the same frame.
 func _work(key: Vector2i) -> void:
 	var ring: int = _ring(key)
 	var chunk: Chunk = _chunks.get(key)
+	var wants_props: bool = ring <= PROP_RADIUS and (chunk == null or chunk.props == null)
 	if chunk == null:
 		chunk = Chunk.new()
 		_chunks[key] = chunk
 		chunk.fine = ring <= FINE_RADIUS
-		chunk.ground = _build_ground(key, chunk.fine)
+		chunk.ground = _build_ground(key, chunk)
 	elif chunk.ground and ((not chunk.fine and ring <= FINE_RADIUS) or (chunk.fine and ring > FINE_RADIUS + 1)):
 		chunk.ground.queue_free()
 		chunk.fine = ring <= FINE_RADIUS
-		chunk.ground = _build_ground(key, chunk.fine)
-	if chunk.props == null and ring <= PROP_RADIUS:
+		chunk.ground = _build_ground(key, chunk)
+	elif wants_props:
 		_build_props(key, chunk)
+		return
+	if wants_props:
+		_queue.push_front(key)
+
+
+## A chunk's heights on the fine grid, worked out once and kept: the fine ground mesh is made
+## from it, the city is stood on it, and the glider is stopped by it.
+func _grid_for(key: Vector2i, chunk: Chunk) -> PackedFloat32Array:
+	if chunk.grid.is_empty():
+		var grid := PackedFloat32Array()
+		grid.resize(GRID_W * GRID_W)
+		var x0: float = key.x * CHUNK - CELL_FINE
+		var z0: float = key.y * CHUNK - CELL_FINE
+		for j in GRID_W:
+			for i in GRID_W:
+				grid[j * GRID_W + i] = maxf(height_at(x0 + i * CELL_FINE, z0 + j * CELL_FINE), -8.0)
+		chunk.grid = grid
+	return chunk.grid
+
+
+## The height at a point on a chunk's fine grid, on the same triangles the mesh is made of.
+func _on_grid(grid: PackedFloat32Array, key: Vector2i, x: float, z: float) -> float:
+	var gx: float = (x - key.x * CHUNK) / CELL_FINE + 1.0
+	var gz: float = (z - key.y * CHUNK) / CELL_FINE + 1.0
+	var i: int = clampi(int(floorf(gx)), 0, GRID_W - 2)
+	var j: int = clampi(int(floorf(gz)), 0, GRID_W - 2)
+	var fx: float = clampf(gx - float(i), 0.0, 1.0)
+	var fz: float = clampf(gz - float(j), 0.0, 1.0)
+	var a: int = j * GRID_W + i
+	if fx + fz <= 1.0:
+		return grid[a] + (grid[a + 1] - grid[a]) * fx + (grid[a + GRID_W] - grid[a]) * fz
+	var far: float = grid[a + GRID_W + 1]
+	return far + (grid[a + GRID_W] - far) * (1.0 - fx) + (grid[a + 1] - far) * (1.0 - fz)
 
 
 ## The ground mesh for one chunk, or null if it is all open sea. It has a skirt hanging from its
 ## edges, so no gap shows where a fine chunk meets a coarse one.
-func _build_ground(key: Vector2i, fine: bool) -> MeshInstance3D:
+func _build_ground(key: Vector2i, chunk: Chunk) -> MeshInstance3D:
 	var x0: float = key.x * CHUNK
 	var z0: float = key.y * CHUNK
 	var dry := false
@@ -344,15 +503,19 @@ func _build_ground(key: Vector2i, fine: bool) -> MeshInstance3D:
 	if not dry:
 		return null
 
-	var cell: float = CELL_FINE if fine else CELL_COARSE
+	var cell: float = CELL_FINE if chunk.fine else CELL_COARSE
 	var n: int = int(CHUNK / cell)
 	# Heights on the chunk's grid plus one cell all round (for the slopes at the edges).
 	var w: int = n + 3
-	var heights := PackedFloat32Array()
-	heights.resize(w * w)
-	for j in w:
-		for i in w:
-			heights[j * w + i] = maxf(height_at(x0 + (i - 1) * cell, z0 + (j - 1) * cell), -8.0)
+	var heights: PackedFloat32Array
+	if chunk.fine:
+		heights = _grid_for(key, chunk)
+	else:
+		heights = PackedFloat32Array()
+		heights.resize(w * w)
+		for j in w:
+			for i in w:
+				heights[j * w + i] = maxf(height_at(x0 + (i - 1) * cell, z0 + (j - 1) * cell), -8.0)
 
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
@@ -378,7 +541,8 @@ func _build_ground(key: Vector2i, fine: bool) -> MeshInstance3D:
 			var flat: float = smoothstep(0.88, 0.96, norm.y)
 			var farm: float = farm_at(x, z) * flat if h > 12.0 else 0.0
 			var in_valley: float = valley(x, z)
-			var sand: float = in_valley * (1.0 - smoothstep(7.0, 13.0, h))
+			# (The head of a trench has a little beach too.)
+			var sand: float = maxf(in_valley, trench(x, z)) * (1.0 - smoothstep(7.0, 13.0, h))
 			colors[k] = Color(farm, sand, in_valley * smoothstep(110.0, 260.0, inland(x, z)))
 
 	var indices := PackedInt32Array()
@@ -413,6 +577,11 @@ func _build_ocean() -> void:
 	mat.set_shader_parameter("haze_color", haze_color)
 	mat.set_shader_parameter("sky_color", sky_color.lerp(haze_color, 0.45))
 	mat.set_shader_parameter("haze_distance", haze_distance)
+	mat.set_shader_parameter("valley_z", VALLEY_Z)
+	mat.set_shader_parameter("valley_half", VALLEY_HALF)
+	mat.set_shader_parameter("trench_spacing", TRENCH_SPACING)
+	mat.set_shader_parameter("trench_half", TRENCH_HALF)
+	mat.set_shader_parameter("trench_water", TRENCH_WATER)
 	_ocean = MeshInstance3D.new()
 	_ocean.mesh = plane
 	_ocean.material_override = mat
@@ -420,6 +589,43 @@ func _build_ocean() -> void:
 	# It follows the glider every frame, so it must not be physics-interpolated.
 	_ocean.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(_ocean)
+
+
+## The painted backdrop's canvas: the eastern side of a big sphere round the glider, from below
+## the horizon to well above the highest peak. shaders/backdrop paints the flats onto it.
+func _build_backdrop() -> void:
+	var across: int = 28
+	var up: int = 8
+	var verts := PackedVector3Array()
+	var indices := PackedInt32Array()
+	for j in up + 1:
+		var el: float = deg_to_rad(lerpf(-30.0, 42.0, float(j) / float(up)))
+		for i in across + 1:
+			var az: float = deg_to_rad(lerpf(-96.0, 96.0, float(i) / float(across)))
+			verts.append(Vector3(cos(el) * cos(az), sin(el), cos(el) * sin(az)) * BACKDROP_RADIUS)
+	for j in up:
+		for i in across:
+			var a: int = j * (across + 1) + i
+			indices.append_array(PackedInt32Array([a, a + 1, a + across + 1, a + 1, a + across + 2, a + across + 1]))
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_backdrop_mat = ShaderMaterial.new()
+	_backdrop_mat.shader = BackdropShader
+	_backdrop_mat.set_shader_parameter("noise_tex", noise_tex)
+	_backdrop_mat.set_shader_parameter("sun_dir", sun_dir)
+	_backdrop_mat.set_shader_parameter("haze_color", haze_color)
+	_backdrop_mat.set_shader_parameter("haze_distance", haze_distance * 2.1)
+	_backdrop_mat.set_shader_parameter("ground", CLIFF_HEIGHT + 150.0)
+	_backdrop = MeshInstance3D.new()
+	_backdrop.mesh = mesh
+	_backdrop.material_override = _backdrop_mat
+	_backdrop.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_backdrop.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	add_child(_backdrop)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -445,6 +651,22 @@ func _on_valley_floor(x: float, z: float) -> bool:
 			and absf(z - river_z(x)) > 45.0 and Vector2(x - castle.x, z - castle.z).length() > 330.0
 
 
+## The lists a chunk's many small things are gathered in, each drawn in one go at the end (see
+## _flush). Every entry is [Transform3D, Color].
+func _new_bag() -> Dictionary:
+	return {"walls": [], "roofs": [], "plain": [], "arches": [], "rocks": [], "trees": [], "crowns": []}
+
+
+func _flush(holder: Node3D, bag: Dictionary) -> void:
+	_scatter(holder, bag["walls"], _box, _building_mat)
+	_scatter(holder, bag["roofs"], _prism)
+	_scatter(holder, bag["plain"], _box)
+	_scatter(holder, bag["arches"], _arch)
+	_scatter(holder, bag["rocks"], _rock, _outcrop_mat)
+	_scatter(holder, bag["trees"], _blob)
+	_scatter(holder, bag["crowns"], _crown, _leaf_mat)
+
+
 func _build_props(key: Vector2i, chunk: Chunk) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(Vector3i(key.x, key.y, world_seed))
@@ -456,27 +678,17 @@ func _build_props(key: Vector2i, chunk: Chunk) -> void:
 	var mid_d: float = inland(x0 + CHUNK * 0.5, z0 + CHUNK * 0.5)
 	if mid_d < -1600.0:
 		return
-	var walls: Array = []  # [Transform3D, Color] for each house body
-	var roofs: Array = []
-	var trees: Array = []
-	var crowns: Array = []
+	var bag: Dictionary = _new_bag()
+	var trees: Array = bag["trees"]
 
-	if mid_d > -CHUNK and mid_d < CLIFF_WIDTH + CHUNK:
-		# Hamlets strung along the ledges. Houses only land where the ledge is flat, so each
-		# hamlet follows its shelf of the cliff.
-		for i in 2:
-			var heart: Vector3 = _find(rng, key, on_ledge, 40)
-			if heart == Vector3.INF:
-				continue
-			for k in rng.randi_range(7, 14):
-				var at := Vector2(heart.x, heart.z) + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(10.0, 120.0)
-				_add_house(at, rng, chunk, walls, roofs)
-		# Windmills: out on the ledges among the fields, and on the rim at the very top.
-		for i in 2:
-			var on_top: bool = i == 1 and rng.randf() < 0.5
-			var at: Vector3 = _find(rng, key, _on_rim if on_top else on_ledge, 30)
-			if at != Vector3.INF and not _crowded(chunk.columns, at.x, at.z, 200.0):
-				_add_windmill(holder, chunk, at, rng.randf_range(2.0, 3.2), rng)
+	# The cliffs: the city, its towers, stairs and viaducts, and the rock.
+	if chunk.ground and mid_d > -CHUNK * 0.75 and mid_d < CLIFF_WIDTH + CHUNK * 0.75:
+		_build_cliff(key, chunk, holder, rng, bag)
+	var k0: int = trench_index(z0)
+	var k1: int = trench_index(z0 + CHUNK)
+	_add_trench_bridge(key, chunk, holder, k0, bag)
+	if k1 != k0:
+		_add_trench_bridge(key, chunk, holder, k1, bag)
 
 	# Farmsteads on the valley floor.
 	for i in 2:
@@ -484,9 +696,9 @@ func _build_props(key: Vector2i, chunk: Chunk) -> void:
 		if stead != Vector3.INF:
 			for k in rng.randi_range(2, 5):
 				_add_house(Vector2(stead.x, stead.z) + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(8.0, 50.0),
-						rng, chunk, walls, roofs)
+						rng, chunk, bag)
 
-	# Trees: woods on the wild top, the odd tree among the fields on the ledges and in the valley.
+	# Trees: woods on the wild top, the odd tree on the ledges and in the valley.
 	for i in 90:
 		var x: float = x0 + rng.randf() * CHUNK
 		var z: float = z0 + rng.randf() * CHUNK
@@ -503,17 +715,22 @@ func _build_props(key: Vector2i, chunk: Chunk) -> void:
 		trees.append([Transform3D(Basis.from_scale(Vector3(r, r * rng.randf_range(1.0, 1.5), r)),
 				Vector3(x, height_at(x, z) + r * 0.6, z)), green])
 
-	# A giant old tree: in the valley most of all, now and then on a ledge or the top.
-	var tx: float = x0 + rng.randf() * CHUNK
-	var tz: float = z0 + rng.randf() * CHUNK
-	var td: float = inland(tx, tz)
-	if td > 80.0 and normal_at(tx, tz).y > 0.94 and absf(tz - river_z(tx)) > 60.0 \
-			and Vector2(tx - castle.x, tz - castle.z).length() > 420.0:
+	# Giant old trees: groves of them in the valley, and one or two to most stretches of the
+	# top and the broader ledges.
+	for i in 5:
+		var tx: float = x0 + rng.randf() * CHUNK
+		var tz: float = z0 + rng.randf() * CHUNK
+		var td: float = inland(tx, tz)
 		var in_valley: bool = valley(tx, tz) > 0.6 and td > 380.0
-		if rng.randf() < (0.75 if in_valley else 0.2):
-			_add_great_tree(holder, chunk.columns, Vector3(tx, height_at(tx, tz), tz),
-					rng.randf_range(48.0, 88.0) if in_valley else rng.randf_range(34.0, 62.0), rng, crowns)
-			chunk.great_trees += 1
+		var luck: float = rng.randf()
+		var reach: float = rng.randf_range(52.0, 96.0) if in_valley else rng.randf_range(38.0, 72.0)
+		if td < 80.0 or luck > (0.8 if in_valley else 0.45) or trench(tx, tz) > 0.0:
+			continue
+		if normal_at(tx, tz).y < 0.94 or (absf(tz - river_z(tx)) < 60.0 and valley(tx, tz) > 0.0) \
+				or Vector2(tx - castle.x, tz - castle.z).length() < 420.0 or _crowded(chunk.columns, tx, tz, reach * 1.6):
+			continue
+		_add_great_tree(holder, chunk.columns, Vector3(tx, height_at(tx, tz), tz), reach, rng, bag["crowns"])
+		chunk.great_trees += 1
 
 	# The sea off the cliffs: a maze of stacks and arches, thickest close in, thinning out to sea.
 	# The way in to the beach is kept clear.
@@ -532,19 +749,287 @@ func _build_props(key: Vector2i, chunk: Chunk) -> void:
 			if rng.randf() < (0.8 if i == 0 else 0.4) * crowd and inland(ax, az) < -260.0 and valley(ax, az) <= 0.0:
 				_add_arch(holder, chunk, Vector3(ax, 0.0, az), rng)
 
-	# A pinnacle on the high ground.
-	var sx: float = x0 + rng.randf() * CHUNK
-	var sz: float = z0 + rng.randf() * CHUNK
-	var sd: float = inland(sx, sz)
-	if sd > CLIFF_WIDTH + 500.0 and valley(sx, sz) <= 0.0 and rng.randf() < 0.14:
-		var tall: float = rng.randf_range(130.0, 260.0)
-		_add_spire(holder, chunk, Vector3(sx, height_at(sx, sz) - 15.0, sz), tall, tall * rng.randf_range(0.13, 0.2) + 16.0, rng)
+	# Pinnacles on the high ground.
+	for i in 2:
+		var sx: float = x0 + rng.randf() * CHUNK
+		var sz: float = z0 + rng.randf() * CHUNK
+		var sd: float = inland(sx, sz)
+		if sd > CLIFF_WIDTH + 400.0 and valley(sx, sz) <= 0.0 and trench(sx, sz) <= 0.0 and rng.randf() < 0.16:
+			var tall: float = rng.randf_range(130.0, 260.0)
+			_add_spire(holder, chunk, Vector3(sx, height_at(sx, sz) - 15.0, sz), tall, tall * rng.randf_range(0.13, 0.2) + 16.0, rng)
 
-	_scatter(holder, walls, _box)
-	_scatter(holder, roofs, _prism)
-	_scatter(holder, trees, _blob)
-	_scatter(holder, crowns, _crown, _leaf_mat)
-	chunk.houses = walls.size()
+	_flush(holder, bag)
+	chunk.houses = (bag["walls"] as Array).size()
+
+
+## Everything that stands on a chunk of the cliffs. It is all stood on the chunk's fine grid of
+## heights, so it sits on the ground as drawn, and stays inside the chunk.
+func _build_cliff(key: Vector2i, chunk: Chunk, holder: Node3D, rng: RandomNumberGenerator, bag: Dictionary) -> void:
+	var grid: PackedFloat32Array = _grid_for(key, chunk)
+	var x0: float = key.x * CHUNK
+	var z0: float = key.y * CHUNK
+	var plain: Array = bag["plain"]
+	var arches: Array = bag["arches"]
+	var rocks: Array = bag["rocks"]
+
+	# The city's districts: houses shoulder to shoulder in rows that step up the slope, each row
+	# looking out over the roofs of the one below.
+	for s in 11:
+		var cx: float = x0 + rng.randf_range(0.15, 0.85) * CHUNK
+		var cz: float = z0 + rng.randf_range(0.15, 0.85) * CHUNK
+		var rows: int = rng.randi_range(7, 13)
+		var cols: int = rng.randi_range(10, 20)
+		var luck: float = rng.randf()
+		var cd: float = inland(cx, cz)
+		if cd < 45.0 or cd > CLIFF_WIDTH * 0.95 or luck > city_at(cx, cz) * 1.6:
+			continue
+		var slope := Vector2(_on_grid(grid, key, cx + 30.0, cz) - _on_grid(grid, key, cx - 30.0, cz),
+				_on_grid(grid, key, cx, cz + 30.0) - _on_grid(grid, key, cx, cz - 30.0)) / 60.0
+		if _on_grid(grid, key, cx, cz) < 10.0 or slope.length() < 0.08 or slope.length() > 2.0:
+			continue
+		var down: Vector2 = -slope.normalized()
+		var along := Vector2(-down.y, down.x)
+		for r in rows:
+			for c in cols:
+				var rr: float = (float(r) + 0.5) / float(rows) * 2.0 - 1.0
+				var cc: float = (float(c) + 0.5) / float(cols) * 2.0 - 1.0
+				var gap: float = rng.randf()
+				var nudge: float = rng.randf_range(-1.5, 1.5)
+				# (A round patch, with the odd gap for a yard or a lane.)
+				if rr * rr + cc * cc > 1.15 or gap < 0.1:
+					continue
+				var at: Vector2 = Vector2(cx, cz) + along * (cc * float(cols) * 7.8 + nudge) - down * (rr * float(rows) * 7.0)
+				_add_city_house(key, chunk, grid, at, atan2(down.x, down.y), 0.1, rng, bag)
+
+	# And houses on their own between the districts, wherever the rock is not sheer.
+	for i in 420:
+		var x: float = x0 + rng.randf() * CHUNK
+		var z: float = z0 + rng.randf() * CHUNK
+		var d: float = inland(x, z)
+		if d < 8.0 or d > CLIFF_WIDTH * 0.98 or rng.randf() > city_at(x, z):
+			continue
+		_add_city_house(key, chunk, grid, Vector2(x, z), INF, 0.4, rng, bag)
+
+	# Towers standing over the roofs.
+	for i in 6:
+		var x: float = x0 + rng.randf_range(0.05, 0.95) * CHUNK
+		var z: float = z0 + rng.randf_range(0.05, 0.95) * CHUNK
+		var d: float = inland(x, z)
+		var tall: float = rng.randf_range(38.0, 84.0)
+		var radius: float = rng.randf_range(5.5, 9.0)
+		if d < 30.0 or d > CLIFF_WIDTH or city_at(x, z) < 0.45 or _crowded(chunk.columns, x, z, 60.0):
+			continue
+		var h: float = _on_grid(grid, key, x, z)
+		var low: float = minf(minf(_on_grid(grid, key, x + radius, z), _on_grid(grid, key, x - radius, z)),
+				minf(_on_grid(grid, key, x, z + radius), _on_grid(grid, key, x, z - radius)))
+		if h < 8.0 or h - low > 40.0:
+			continue
+		_add_tower(holder, chunk.columns, Vector2(x, z), tall + h - low + 6.0, radius, low - 6.0)
+		chunk.towers += 1
+
+	# Stairways: flights zigzagging up the cliff from the water.
+	for s in 3:
+		var z: float = z0 + rng.randf_range(0.1, 0.9) * CHUNK
+		var d: float = rng.randf_range(10.0, 40.0)
+		var way: float = 1.0 if rng.randf() < 0.5 else -1.0
+		var flights: int = rng.randi_range(9, 16)
+		if city_at(shore_x(z) + 100.0, z) < 0.35:
+			continue
+		var from := Vector3(shore_x(z) + d, 0.0, z)
+		from.y = _on_grid(grid, key, from.x, from.z) + 0.8
+		for flight in flights:
+			z = clampf(z + way * rng.randf_range(30.0, 58.0), z0 + 2.0, z0 + CHUNK - 2.0)
+			d += rng.randf_range(16.0, 44.0)
+			var to := Vector3(shore_x(z) + d, 0.0, z)
+			if d > CLIFF_WIDTH or to.x < x0 or to.x > x0 + CHUNK or from.x < x0 or from.x > x0 + CHUNK:
+				break
+			to.y = _on_grid(grid, key, to.x, to.z) + 0.8
+			if from.y > 3.0 and to.y > 3.0:
+				plain.append([_beam(from, to, 5.0, 1.8), STONE])
+				chunk.stairs += 1
+			from = to
+			way = -way
+
+	# Viaducts: a road carried level along the cliff on a row of arches, over the gullies.
+	for s in 3:
+		var z1: float = z0 + rng.randf_range(0.06, 0.6) * CHUNK
+		var z2: float = z1 + rng.randf_range(110.0, 300.0)
+		var d: float = rng.randf_range(50.0, CLIFF_WIDTH * 0.9)
+		var a := Vector3(shore_x(z1) + d, 0.0, z1)
+		var b := Vector3(shore_x(z2) + d, 0.0, z2)
+		if minf(a.x, b.x) < x0 or maxf(a.x, b.x) > x0 + CHUNK or z2 > z0 + CHUNK or city_at(a.x, z1) < 0.35:
+			continue
+		a.y = _on_grid(grid, key, a.x, a.z)
+		b.y = _on_grid(grid, key, b.x, b.z)
+		if minf(a.y, b.y) < 6.0 or absf(a.y - b.y) > 18.0:
+			continue
+		var deck: float = maxf(a.y, b.y) + 2.0
+		var run: Vector3 = Vector3(b.x - a.x, 0.0, b.z - a.z)
+		var along: Vector3 = run.normalized()
+		var spans: int = maxi(int(round(run.length() / 26.0)), 2)
+		var span: float = run.length() / float(spans)
+		var stood := 0
+		for i in spans:
+			var mid: Vector3 = a + run * ((float(i) + 0.5) / float(spans))
+			var low: float = INF
+			for t: float in [-0.5, 0.0, 0.5]:
+				low = minf(low, _on_grid(grid, key, mid.x + along.x * span * t, mid.z + along.z * span * t))
+			var tall: float = deck - low + 6.0
+			if tall < 10.0 or low < 2.0:
+				continue
+			arches.append([Transform3D(Basis(along * span, Vector3.UP * tall, along.cross(Vector3.UP) * 6.0), Vector3(mid.x, low - 6.0, mid.z)), STONE])
+			stood += 1
+		if stood > 0:
+			plain.append([_beam(Vector3(a.x, deck + 0.6, a.z), Vector3(b.x, deck + 0.6, b.z), 7.5, 1.6), STONE.darkened(0.12)])
+			chunk.bridges += 1
+
+	# Rock towers: pinnacles standing up out of the ledges and against the walls.
+	for i in 8:
+		var x: float = x0 + rng.randf() * CHUNK
+		var z: float = z0 + rng.randf() * CHUNK
+		var d: float = inland(x, z)
+		var tall: float = rng.randf_range(60.0, 240.0)
+		var girth: float = tall * rng.randf_range(0.12, 0.2) + 10.0
+		if d < 30.0 or d > CLIFF_WIDTH * 1.15 or valley(x, z) > 0.0 or _crowded(chunk.columns, x, z, 80.0):
+			continue
+		var h: float = _on_grid(grid, key, x, z)
+		if h < 4.0:
+			continue
+		_add_spire(holder, chunk, Vector3(x, h - 30.0, z), tall + 30.0, girth, rng)
+		chunk.rock_towers += 1
+
+	# Outcrops: blocks of rock jutting from every steep face, so the walls have real ledges,
+	# overhangs and shadows and a broken edge against the sky.
+	for i in 340:
+		var x: float = x0 + rng.randf() * CHUNK
+		var z: float = z0 + rng.randf() * CHUNK
+		var d: float = inland(x, z)
+		var size: float = rng.randf_range(12.0, 34.0) * (1.7 if rng.randf() < 0.12 else 1.0)
+		var squash := Vector3(rng.randf_range(0.7, 1.3), rng.randf_range(0.6, 1.5), rng.randf_range(0.7, 1.3))
+		var spin := Vector3(rng.randf() * TAU, rng.randf() * TAU, rng.randf() * TAU)
+		if d < 4.0 or d > CLIFF_WIDTH * 1.2 or valley(x, z) > 0.2:
+			continue
+		var h: float = _on_grid(grid, key, x, z)
+		var grad := Vector2(_on_grid(grid, key, x + 10.0, z) - _on_grid(grid, key, x - 10.0, z),
+				_on_grid(grid, key, x, z + 10.0) - _on_grid(grid, key, x, z - 10.0)) / 20.0
+		if h < 2.0 or grad.length() < 0.7:
+			continue
+		# Pushed a little way out of the face.
+		var out: Vector2 = -grad.normalized() * size * 0.2
+		rocks.append([Transform3D(Basis.from_euler(spin).scaled_local(squash * size), Vector3(x + out.x, h, z + out.y)), Color.BLACK])
+		if size > 36.0:
+			chunk.columns.append([Vector3(x + out.x, h - size * 0.7, z + out.y), size * 1.4, size * 0.6, size * 0.45])
+		chunk.outcrops += 1
+
+	# A windmill or two still turns: on a ledge among the fields, or on the rim at the very top.
+	var on_top: bool = rng.randf() < 0.5
+	var mill: Vector3 = _find(rng, key, _on_rim if on_top else on_ledge, 14)
+	if mill != Vector3.INF and not _crowded(chunk.columns, mill.x, mill.z, 120.0):
+		_add_windmill(holder, chunk, mill, rng.randf_range(2.0, 3.2), rng)
+
+
+## One house of the city: dug into the slope behind it and standing tall on the side that faces
+## out, so they pile up the cliff one above another, and hang from the walls. `yaw` is the way it faces (INF: straight
+## down the slope it stands on), give or take `loose`.
+func _add_city_house(key: Vector2i, chunk: Chunk, grid: PackedFloat32Array, at: Vector2, yaw: float, loose: float,
+		rng: RandomNumberGenerator, bag: Dictionary) -> void:
+	var wide: float = rng.randf_range(13.0, 20.0)
+	var deep: float = rng.randf_range(12.0, 17.0)
+	var rise: float = rng.randf_range(9.0, 21.0) + (14.0 if rng.randf() < 0.18 else 0.0)
+	var turn: float = rng.randf()
+	var look: int = rng.randi()
+	var x0: float = key.x * CHUNK
+	var z0: float = key.y * CHUNK
+	if at.x < x0 or at.x > x0 + CHUNK or at.y < z0 or at.y > z0 + CHUNK:
+		return
+	var h: float = _on_grid(grid, key, at.x, at.y)
+	if h < 5.0:
+		return
+	var grad := Vector2(_on_grid(grid, key, at.x + 8.0, at.y) - _on_grid(grid, key, at.x - 8.0, at.y),
+			_on_grid(grid, key, at.x, at.y + 8.0) - _on_grid(grid, key, at.x, at.y - 8.0)) / 16.0
+	var steep: float = grad.length()
+	# A hall now and then, where there is room for one.
+	if look % 23 == 0 and steep < 0.7:
+		wide *= 2.0
+		deep *= 1.7
+		rise += 16.0
+	var drop: float = steep * deep
+	if drop > 95.0:
+		return
+	if yaw == INF:
+		yaw = atan2(-grad.x, -grad.y) if steep > 0.08 else turn * TAU
+	# On a slope its foot goes down to the ground at its front. On a wall too steep for that it
+	# hangs: its back is bedded in the rock and the rest juts out over the drop.
+	var tall: float = minf(drop + 4.0, 26.0) + rise
+	var foot: float = h + drop * 0.5 + rise - tall
+	var facing := Basis(Vector3.UP, yaw + (turn - 0.5) * loose)
+	var plaster: Color = PLASTER[look % PLASTER.size()]
+	var tile: Color = TILES[(look / 7) % TILES.size()]
+	(bag["walls"] as Array).append([Transform3D(facing.scaled_local(Vector3(wide, tall, deep)), Vector3(at.x, foot + tall * 0.5, at.y)),
+			plaster.lerp(Color(0.7, 0.64, 0.55), turn * 0.3)])
+	if look % 4 == 0:
+		# A flat roof with a low wall round it.
+		(bag["plain"] as Array).append([Transform3D(facing.scaled_local(Vector3(wide + 1.0, 1.4, deep + 1.0)), Vector3(at.x, foot + tall + 0.4, at.y)), STONE])
+	else:
+		var pitch: float = deep * 0.4
+		# (The ridge runs along the house's longer side.)
+		var roof: Basis = facing if deep >= wide else facing * Basis(Vector3.UP, PI * 0.5)
+		var across: Vector3 = Vector3(wide + 1.4, pitch, deep + 1.6) if deep >= wide else Vector3(deep + 1.6, pitch, wide + 1.4)
+		(bag["roofs"] as Array).append([Transform3D(roof.scaled_local(across), Vector3(at.x, foot + tall + pitch * 0.5, at.y)), tile])
+	chunk.city_houses += 1
+
+
+## A long flat box laid from one point to another (a flight of stairs, a road deck), as a
+## transform for the unit box.
+func _beam(from: Vector3, to: Vector3, width: float, thick: float) -> Transform3D:
+	var along: Vector3 = (to - from).normalized()
+	var side: Vector3 = along.cross(Vector3.UP).normalized()
+	var up: Vector3 = side.cross(along)
+	return Transform3D(Basis(side * width, up * thick, -along * (from.distance_to(to) + width * 0.5)), (from + to) * 0.5)
+
+
+## The bridge over trench k, if this is the chunk it stands in: a row of tall arches from wall to
+## wall, high above the water, with a gate tower at each end. The arches are wide enough to fly
+## through.
+func _add_trench_bridge(key: Vector2i, chunk: Chunk, holder: Node3D, k: int, bag: Dictionary) -> void:
+	if k == 0:
+		return
+	var bx: float = shore_x(trench_z(k)) + 190.0 + 70.0 * sin(float(k) * 3.3)
+	var mid: float = trench_mid(k, bx)
+	if _key_of(bx, mid) != key:
+		return
+	var half: float = trench_half(k, inland(bx, mid))
+	var za: float = mid - half * 1.05
+	var zb: float = mid + half * 1.05
+	var deck: float = minf(minf(height_at(bx, za), height_at(bx, zb)) - 8.0, 250.0)
+	if deck < 90.0:
+		return
+	# Bring each end in to where the wall is, and bed it in.
+	for i in 14:
+		if height_at(bx, za + 12.0) < deck + 6.0:
+			break
+		za += 12.0
+	for i in 14:
+		if height_at(bx, zb - 12.0) < deck + 6.0:
+			break
+		zb -= 12.0
+	za -= 10.0
+	zb += 10.0
+	var spans: int = maxi(int(round((zb - za) / 95.0)), 2)
+	var span: float = (zb - za) / float(spans)
+	var tall: float = deck + 16.0
+	for i in spans:
+		(bag["arches"] as Array).append([Transform3D(Basis(Vector3(0, 0, span), Vector3(0, tall, 0), Vector3(-15.0, 0, 0)),
+				Vector3(bx, -16.0, za + (float(i) + 0.5) * span)), STONE])
+		if i > 0:
+			chunk.columns.append([Vector3(bx, -16.0, za + float(i) * span), tall, span * 0.09, span * 0.09])
+	# The solid band over the arches.
+	var band: float = tall * 0.1
+	chunk.capsules.append([Vector3(bx, deck - band * 0.5, za), Vector3(bx, deck - band * 0.5, zb), band * 0.5 + 4.0])
+	(bag["plain"] as Array).append([Transform3D(Basis.from_scale(Vector3(18.0, 3.0, zb - za + 8.0)), Vector3(bx, deck + 1.5, (za + zb) * 0.5)), STONE.darkened(0.12)])
+	for end: float in [za + 6.0, zb - 6.0]:
+		_add_tower(holder, chunk.columns, Vector2(bx, end), 78.0, 11.0, deck - 26.0)
+	chunk.bridges += 1
 
 
 func _crowded(columns: Array, x: float, z: float, gap: float) -> bool:
@@ -555,21 +1040,20 @@ func _crowded(columns: Array, x: float, z: float, gap: float) -> bool:
 	return false
 
 
-func _add_house(at: Vector2, rng: RandomNumberGenerator, chunk: Chunk, walls: Array, roofs: Array) -> void:
+## A farmhouse on flat ground (the valley, and the castle's town).
+func _add_house(at: Vector2, rng: RandomNumberGenerator, chunk: Chunk, bag: Dictionary) -> void:
 	if normal_at(at.x, at.y).y < 0.955 or height_at(at.x, at.y) < 14.0:
 		return
 	if absf(at.y - river_z(at.x)) < 26.0 and valley(at.x, at.y) > 0.3:
 		return
-	if chunk and inland(at.x, at.y) < CLIFF_WIDTH and valley(at.x, at.y) < 0.05:
-		chunk.ledge_houses += 1
 	var size := Vector3(rng.randf_range(8.0, 14.0), rng.randf_range(4.5, 6.5), rng.randf_range(6.0, 9.0))
 	var ground: float = height_at(at.x, at.y)
 	var turn := Basis(Vector3.UP, rng.randf() * TAU)
 	var wall := Color(0.9, 0.86, 0.76).lerp(Color(0.72, 0.66, 0.56), rng.randf())
 	var tile: Color = [Color(0.62, 0.27, 0.18), Color(0.5, 0.3, 0.2), Color(0.32, 0.36, 0.42)][rng.randi() % 3]
-	walls.append([Transform3D(turn.scaled_local(size), Vector3(at.x, ground + size.y * 0.5 - 0.5, at.y)), wall])
+	(bag["walls"] as Array).append([Transform3D(turn.scaled_local(size), Vector3(at.x, ground + size.y * 0.5 - 0.5, at.y)), wall])
 	var pitch: float = size.z * 0.45
-	roofs.append([Transform3D(turn.scaled_local(Vector3(size.x + 1.2, pitch, size.z + 1.4)),
+	(bag["roofs"] as Array).append([Transform3D(turn.scaled_local(Vector3(size.x + 1.2, pitch, size.z + 1.4)),
 			Vector3(at.x, ground + size.y - 0.5 + pitch * 0.5, at.y)), tile])
 
 
@@ -590,6 +1074,77 @@ func _scatter(holder: Node3D, items: Array, mesh: Mesh, material: Material = nul
 	node.material_override = material if material else _house_mat
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	holder.add_child(node)
+
+
+## One flat-shaded triangle facing along `normal`, whichever way round its corners are given.
+static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, normal: Vector3) -> void:
+	# (Godot's front faces wind clockwise.)
+	if (b - a).cross(c - a).dot(normal) > 0.0:
+		var swap: Vector3 = b
+		b = c
+		c = swap
+	for p: Vector3 in [a, b, c]:
+		st.set_normal(normal)
+		st.add_vertex(p)
+
+
+static func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, normal: Vector3) -> void:
+	_tri(st, a, b, c, normal)
+	_tri(st, a, c, d, normal)
+
+
+## One span of a bridge: a block one unit wide, tall and thick, standing on y = 0, with a round-
+## headed opening through it. Stretched to fit, a row of them makes a viaduct.
+func _make_arch() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var steps: int = 12
+	var curve: Array = []
+	for i in steps + 1:
+		var a: float = PI - PI * float(i) / float(steps)
+		curve.append(Vector2(cos(a) * 0.42, sin(a) * 0.9))
+	for face: float in [0.5, -0.5]:
+		var n := Vector3(0, 0, signf(face))
+		for i in steps:
+			var p: Vector2 = curve[i]
+			var q: Vector2 = curve[i + 1]
+			_quad(st, Vector3(p.x, p.y, face), Vector3(q.x, q.y, face), Vector3(q.x, 1.0, face), Vector3(p.x, 1.0, face), n)
+		for leg: float in [-1.0, 1.0]:
+			_quad(st, Vector3(0.42 * leg, 0.0, face), Vector3(0.5 * leg, 0.0, face), Vector3(0.5 * leg, 1.0, face), Vector3(0.42 * leg, 1.0, face), n)
+	# The underside of the arch.
+	for i in steps:
+		var p: Vector2 = curve[i]
+		var q: Vector2 = curve[i + 1]
+		var mid: Vector2 = (p + q) * 0.5
+		_quad(st, Vector3(p.x, p.y, 0.5), Vector3(q.x, q.y, 0.5), Vector3(q.x, q.y, -0.5), Vector3(p.x, p.y, -0.5),
+				-Vector3(mid.x / 0.42, mid.y / 0.9, 0.0).normalized())
+	_quad(st, Vector3(-0.5, 1, 0.5), Vector3(0.5, 1, 0.5), Vector3(0.5, 1, -0.5), Vector3(-0.5, 1, -0.5), Vector3.UP)
+	for side: float in [-0.5, 0.5]:
+		_quad(st, Vector3(side, 0, 0.5), Vector3(side, 1, 0.5), Vector3(side, 1, -0.5), Vector3(side, 0, -0.5), Vector3(signf(side), 0, 0))
+	return st.commit()
+
+
+## A lump of rock: a twenty-sided ball knocked out of shape, with flat faces.
+func _make_rock() -> ArrayMesh:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = world_seed + 5
+	var g: float = (1.0 + sqrt(5.0)) * 0.5
+	var corners: Array = []
+	for p: Vector3 in [Vector3(-1, g, 0), Vector3(1, g, 0), Vector3(-1, -g, 0), Vector3(1, -g, 0), Vector3(0, -1, g), Vector3(0, 1, g),
+			Vector3(0, -1, -g), Vector3(0, 1, -g), Vector3(g, 0, -1), Vector3(g, 0, 1), Vector3(-g, 0, -1), Vector3(-g, 0, 1)]:
+		corners.append(p.normalized() * rng.randf_range(0.68, 1.12))
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for face: Array in [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+			[3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]]:
+		var a: Vector3 = corners[face[0]]
+		var b: Vector3 = corners[face[1]]
+		var c: Vector3 = corners[face[2]]
+		var n: Vector3 = (b - a).cross(c - a).normalized()
+		if n.dot(a + b + c) < 0.0:
+			n = -n
+		_tri(st, a, b, c, n)
+	return st.commit()
 
 
 ## A spire's radius, as a share of its foot, at a share t of the way up.
@@ -701,8 +1256,9 @@ func _add_great_tree(holder: Node3D, columns: Array, at: Vector3, reach: float, 
 
 
 ## A round stone tower with a pointed roof. Returns the height of the top of its walls.
-func _add_tower(holder: Node3D, columns: Array, at: Vector2, height: float, radius: float) -> float:
-	var ground: float = height_at(at.x, at.y) - 6.0
+## `foot` is the height its base goes down to; left out, it is sunk a little into the ground there.
+func _add_tower(holder: Node3D, columns: Array, at: Vector2, height: float, radius: float, foot: float = INF) -> float:
+	var ground: float = foot if foot != INF else height_at(at.x, at.y) - 6.0
 	var shaft := CylinderMesh.new()
 	shaft.top_radius = radius * 0.86
 	shaft.bottom_radius = radius
@@ -837,21 +1393,20 @@ func _build_castle() -> void:
 	holder.add_child(mount)
 	_add_sails(mount, Vector3(0, 0, -19.5), 46.0, rng)
 
-	# The great tree: older than the castle, across the stream from it.
-	var crowns: Array = []
-	var tree_x: float = castle.x - 120.0
-	var tree_z: float = river_z(tree_x) - 260.0
-	_add_great_tree(holder, _columns, Vector3(tree_x, height_at(tree_x, tree_z), tree_z), 125.0, rng, crowns)
-	_scatter(holder, crowns, _crown, _leaf_mat)
+	# The great trees: older than the castle. The biggest stands across the stream from it, and
+	# the rest of the grove is strung out up the valley.
+	var bag: Dictionary = _new_bag()
+	var crowns: Array = bag["crowns"]
+	for tree: Array in [[-120.0, -260.0, 125.0], [-460.0, 250.0, 84.0], [330.0, -330.0, 96.0], [620.0, 280.0, 78.0], [-700.0, -300.0, 70.0]]:
+		var tree_x: float = castle.x + float(tree[0])
+		var tree_z: float = river_z(tree_x) + float(tree[1])
+		_add_great_tree(holder, _columns, Vector3(tree_x, height_at(tree_x, tree_z), tree_z), tree[2], rng, crowns)
 
 	# The town, outside the walls.
-	var walls: Array = []
-	var roofs: Array = []
 	for k in 150:
 		var out: float = rng.randf_range(half + 40.0, half + 230.0)
-		_add_house(here + Vector2.from_angle(rng.randf() * TAU) * out, rng, null, walls, roofs)
-	_scatter(holder, walls, _box)
-	_scatter(holder, roofs, _prism)
+		_add_house(here + Vector2.from_angle(rng.randf() * TAU) * out, rng, null, bag)
+	_flush(holder, bag)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -870,15 +1425,27 @@ func _near_columns(world: Vector3) -> Array:
 	return out
 
 
-## If a ball at a world position is in the ground, the sea, a spire, a tower or a windmill,
-## returns the push that gets it out. Vector3.ZERO means it is in clear air.
+## The height of the ground as it is drawn: on the mesh's own triangles where the chunk is built
+## (the mesh cuts the corners of height_at()'s sharpest ridges and gullies), height_at() elsewhere.
+func surface_at(x: float, z: float) -> float:
+	var key: Vector2i = _key_of(x, z)
+	var chunk: Chunk = _chunks.get(key)
+	if chunk == null or chunk.grid.is_empty():
+		return height_at(x, z)
+	return _on_grid(chunk.grid, key, x, z)
+
+
+## If a ball at a world position is in the ground, the sea, a spire, a tower, a bridge or a
+## windmill, returns the push that gets it out. Vector3.ZERO means it is in clear air.
 func hit(world: Vector3, radius: float) -> Vector3:
-	var ground: float = height_at(world.x, world.z)
+	var ground: float = surface_at(world.x, world.z)
 	var low: float = world.y - radius
 	if low < maxf(ground, 0.0):
 		if ground <= 0.0:
 			return Vector3.UP * -low
-		var n: Vector3 = normal_at(world.x, world.z)
+		var e: float = 10.0
+		var n: Vector3 = Vector3(surface_at(world.x - e, world.z) - surface_at(world.x + e, world.z), 2.0 * e,
+				surface_at(world.x, world.z - e) - surface_at(world.x, world.z + e)).normalized()
 		return n * maxf((ground - low) * n.y, 0.05)
 	for c: Array in _near_columns(world):
 		var foot: Vector3 = c[0]

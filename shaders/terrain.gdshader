@@ -1,14 +1,19 @@
 shader_type spatial;
 
-// The island's ground, and the rock spires. Flat ground is grass, or a patchwork of fields where
-// the mesh says there are farms (vertex colour red, see coast.gd), or beach sand (green). Steep
-// ground is banded cliff rock.
+// The coast's ground, and its rock: spires, arches, towers and outcrops. Flat ground is grass, or
+// a patchwork of fields where the mesh says there are farms (vertex colour red, see coast.gd), or
+// beach sand (green). Steep ground is cliff rock: laid down in beds of uneven thickness, each its
+// own flat tone, with a line of shadow under every bed, and split by joints into blocks that
+// each catch the light a little differently, so a cliff face is broken into lit and shaded
+// facets instead of one smooth sheet.
 
 #include "toon.gdshaderinc"
 
 uniform sampler2D noise_tex : repeat_enable, filter_linear_mipmap;
 // The spires use this shader too, but have no farm data in their vertices.
 uniform bool use_farms = true;
+// The outcrops are rock all over, with no grass on their tops.
+uniform bool all_rock = false;
 // Where the valley meets the sea (z). The stream below repeats coast.gd's river_z().
 uniform float valley_z = 0.0;
 
@@ -85,11 +90,35 @@ void fragment() {
 		col = mix(col, vec3(0.9, 0.82, 0.62) * mix(0.93, 1.05, fine), smoothstep(0.3, 0.7, sand));
 	}
 
-	// Cliffs: rock wherever the ground is steep, laid down in bands.
-	float steep = 1.0 - smoothstep(0.6, 0.8, w_normal.y + (fine - 0.5) * 0.2);
-	float band = smoothstep(0.25, 0.75, sin(w_pos.y * 0.11 + wide * 4.0 + fine * 2.0) * 0.5 + 0.5);
-	vec3 rock = mix(vec3(0.76, 0.66, 0.5), vec3(0.86, 0.78, 0.62), band) * mix(0.84, 1.05, fine);
+	// Cliffs: rock wherever the ground is steep.
+	float steep = all_rock ? 1.0 : 1.0 - smoothstep(0.6, 0.8, w_normal.y + (fine - 0.5) * 0.2);
+	// The beds: they dip and roll a little as they run along the coast.
+	float bed = (w_pos.y + (wide - 0.5) * 80.0 + sin(w_pos.x * 0.004 + w_pos.z * 0.006) * 18.0) / 19.0;
+	// Some beds are two or three thick.
+	float bed_id = floor(bed);
+	bed_id -= mod(bed_id, 1.0 + floor(hash(vec2(floor(bed_id / 3.0), 1.0)) * 2.99));
+	float tone = hash(vec2(bed_id, 3.0));
+	vec3 rock = mix(vec3(0.57, 0.5, 0.43), vec3(0.83, 0.77, 0.65), floor(tone * 4.0) / 3.0);
+	if (hash(vec2(bed_id, 9.0)) > 0.9) {
+		rock = vec3(0.66, 0.5, 0.41);
+	}
+	// The joints: each bed is split into blocks, staggered from the bed below.
+	// (Wide, and leaning a different way in each bed, so they read as cracks, not as masonry.)
+	float run = (w_pos.z + w_pos.x * 0.7 + w_pos.y * (hash(vec2(bed_id, 2.0)) - 0.5) * 1.2) / 58.0 + hash(vec2(bed_id, 5.0)) * 7.0;
+	float block_id = floor(run);
+	float block_f = fract(run);
+	rock *= mix(0.97, 1.03, hash(vec2(block_id, bed_id)));
+	// Lines fade out before they are thinner than a pixel.
+	float thin = fwidth(bed) + fwidth(run);
+	float lines = 1.0 - smoothstep(0.15, 0.6, thin);
+	float crack = (1.0 - smoothstep(0.0, 0.018 + thin, min(block_f, 1.0 - block_f))) * step(0.5, hash(vec2(block_id, bed_id + 40.0)));
+	float under = 1.0 - smoothstep(0.0, 0.07 + thin, bed - bed_id);
+	rock = mix(rock, rock * 0.7, max(crack * 0.8, under) * lines);
 	col = mix(col, rock, steep);
+	// Each block faces its own way a little, so the light breaks the face into facets.
+	vec3 tilt = vec3(hash(vec2(block_id, bed_id + 11.0)), hash(vec2(block_id, bed_id + 23.0)), hash(vec2(block_id + 7.0, bed_id))) - 0.5;
+	float far_off = 1.0 - smoothstep(2500.0, 7000.0, dist);
+	NORMAL = normalize(NORMAL + (VIEW_MATRIX * vec4(tilt, 0.0)).xyz * 0.7 * steep * far_off);
 	// Wet and dark where the sea washes the foot of the cliffs.
 	col = mix(col * 0.55, col, smoothstep(-2.0, 7.0, w_pos.y));
 

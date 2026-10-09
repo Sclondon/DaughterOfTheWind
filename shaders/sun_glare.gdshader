@@ -21,14 +21,14 @@ void fragment() {
 	float r = length(p);
 	float a = atan(p.y, p.x);
 	// A wide warm veil, a tight hot core, six rays, and a long thin streak.
-	float bloom = exp(-r * 4.5) * 0.4 + exp(-r * 22.0) * 0.95;
-	float rays = pow(abs(cos(a * 3.0 + 0.3)), 30.0) * exp(-r * 4.5) * 0.4
-		+ pow(abs(cos(a * 3.0 + 1.35)), 60.0) * exp(-r * 7.0) * 0.3;
-	float streak = exp(-abs(p.y) * 110.0) * exp(-abs(p.x) * 1.8) * 0.45;
+	float bloom = exp(-r * 6.0) * 0.2 + exp(-r * 26.0) * 0.8;
+	float rays = pow(abs(cos(a * 3.0 + 0.3)), 40.0) * exp(-r * 7.0) * 0.3
+		+ pow(abs(cos(a * 3.0 + 1.35)), 80.0) * exp(-r * 10.0) * 0.22;
+	float streak = exp(-abs(p.y) * 160.0) * exp(-abs(p.x) * 3.0) * 0.3;
 	vec3 col = vec3(1.0, 0.93, 0.76) * (bloom + rays + streak);
-	col += vec3(0.5, 0.8, 1.0) * ghost(UV, 0.55, 0.035, 1.0) * 0.16;
-	col += vec3(1.0, 0.7, 0.5) * ghost(UV, 0.85, 0.02, 0.0) * 0.14;
-	col += vec3(0.6, 1.0, 0.7) * ghost(UV, 1.35, 0.07, 1.0) * 0.1;
-	col += vec3(1.0, 0.85, 0.6) * ghost(UV, 1.8, 0.11, 1.0) * 0.07;
+	col += vec3(0.5, 0.8, 1.0) * ghost(UV, 0.55, 0.03, 1.0) * 0.07;
+	col += vec3(1.0, 0.7, 0.5) * ghost(UV, 0.85, 0.016, 0.0) * 0.07;
+	col += vec3(0.6, 1.0, 0.7) * ghost(UV, 1.35, 0.05, 1.0) * 0.045;
+	col += vec3(1.0, 0.85, 0.6) * ghost(UV, 1.8, 0.08, 1.0) * 0.03;
 	COLOR = vec4(col * strength, 1.0);
 }
